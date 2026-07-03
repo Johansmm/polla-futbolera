@@ -22,9 +22,15 @@ const db = admin.firestore();
 // fields (phase/teams/kickoff_at) refreshed — real_score_a, real_score_b and
 // locked are left alone once a match has been created, so entering results
 // via the console won't get wiped out by a later re-seed.
+//
+// kickoff_at is written in Central European time — use the "+02:00" offset
+// (CEST, UTC+2), which covers the whole tournament window (late June through
+// the Final in mid-July, before EU clocks fall back to CET/+01:00 in
+// October). new Date(...) parses the offset correctly, so Firestore still
+// stores the right absolute instant regardless of the offset used here.
 const MATCHES = [
-  { match_id: "r16_01", phase: "r16", team_a: null, team_b: null, kickoff_at: "2026-06-28T18:00:00Z" },
-  { match_id: "r16_02", phase: "r16", team_a: null, team_b: null, kickoff_at: "2026-06-28T21:00:00Z" },
+  { match_id: "r16_01", phase: "r16", team_a: "Canada", team_b: "Marruecos", kickoff_at: "2026-07-04T19:00:00+02:00" },
+  { match_id: "r16_02", phase: "r16", team_a: "Francia", team_b: "Paraguay", kickoff_at: "2026-07-04T23:00:00+02:00" },
   // ... add the remaining Round of 16, QF, SF, Third Place, Final matches.
 ];
 
@@ -35,6 +41,7 @@ const MATCHES = [
 // on "_", which only works if user_id itself has none.
 const USERS = [
   { user_id: "johan", name: "Johan" },
+  { user_id: "kevin", name: "Kevin" },
   // ... add the rest of the group here.
 ];
 
