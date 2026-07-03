@@ -1,0 +1,217 @@
+import {
+  collection,
+  getDocs,
+  doc,
+  getDoc,
+  setDoc,
+  query,
+  orderBy,
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { db } from "./firebase-init.js";
+import { signInWithToken, switchAccount } from "./auth.js";
+
+const PHASE_LABELS = {
+  r16: "Octavos de Final",
+  qf: "Cuartos de Final",
+  sf: "Semifinales",
+  third_place: "Tercer Puesto",
+  final: "Final",
+};
+
+const PHASE_ORDER = ["r16", "qf", "sf", "third_place", "final"];
+
+const statusEl = document.getElementById("status");
+const formEl = document.getElementById("predictions-form");
+
+function getTokenFromUrl() {
+  return new URLSearchParams(window.location.search).get("token");
+}
+
+function showStatus(message, isError = false) {
+  statusEl.textContent = message;
+  statusEl.classList.toggle("error", isError);
+  statusEl.hidden = false;
+}
+
+function isMatchLocked(match) {
+  if (match.locked) return true;
+  const kickoff = match.kickoff_at?.toDate
+    ? match.kickoff_at.toDate()
+    : new Date(match.kickoff_at);
+  return Date.now() >= kickoff.getTime();
+}
+
+async function fetchMatches() {
+  const snap = await getDocs(query(collection(db, "matches"), orderBy("kickoff_at")));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+async function fetchPredictions(userId, matches) {
+  const entries = await Promise.all(
+    matches.map(async (match) => {
+      const predSnap = await getDoc(doc(db, "predictions", `${userId}_${match.id}`));
+      return [match.id, predSnap.exists() ? predSnap.data() : null];
+    })
+  );
+  return Object.fromEntries(entries);
+}
+
+function groupByPhase(matches) {
+  const groups = {};
+  for (const match of matches) {
+    if (!groups[match.phase]) groups[match.phase] = [];
+    groups[match.phase].push(match);
+  }
+  return groups;
+}
+
+function renderMatchRow(match, prediction, userId) {
+  const row = document.createElement("div");
+  row.className = "match-row";
+
+  const locked = isMatchLocked(match);
+
+  row.innerHTML = `
+    <div class="match-teams">${match.team_a ?? "?"} vs ${match.team_b ?? "?"}</div>
+    <div class="match-inputs">
+      <input type="number" min="0" class="score-a" value="${prediction?.predicted_score_a ?? ""}" ${locked ? "disabled" : ""} />
+      <span>-</span>
+      <input type="number" min="0" class="score-b" value="${prediction?.predicted_score_b ?? ""}" ${locked ? "disabled" : ""} />
+      <button type="button" class="save-btn" ${locked ? "disabled" : ""}>Guardar</button>
+    </div>
+    ${locked ? '<div class="locked-label">Bloqueado</div>' : ""}
+    <div class="save-feedback" hidden></div>
+  `;
+
+  if (locked) return row;
+
+  const scoreAInput = row.querySelector(".score-a");
+  const scoreBInput = row.querySelector(".score-b");
+  const saveBtn = row.querySelector(".save-btn");
+  const feedback = row.querySelector(".save-feedback");
+
+  saveBtn.addEventListener("click", async () => {
+    const predictedScoreA = Number.parseInt(scoreAInput.value, 10);
+    const predictedScoreB = Number.parseInt(scoreBInput.value, 10);
+
+    feedback.classList.remove("error");
+
+    if (
+      Number.isNaN(predictedScoreA) ||
+      Number.isNaN(predictedScoreB) ||
+      predictedScoreA < 0 ||
+      predictedScoreB < 0
+    ) {
+      feedback.textContent = "Ingresa un marcador válido.";
+      feedback.classList.add("error");
+      feedback.hidden = false;
+      return;
+    }
+
+    saveBtn.disabled = true;
+    try {
+      await setDoc(
+        doc(db, "predictions", `${userId}_${match.id}`),
+        {
+          prediction_id: `${userId}_${match.id}`,
+          user_id: userId,
+          match_id: match.id,
+          predicted_score_a: predictedScoreA,
+          predicted_score_b: predictedScoreB,
+          points_earned: prediction?.points_earned ?? null,
+        },
+        { merge: true }
+      );
+      feedback.textContent = "Guardado.";
+    } catch (err) {
+      feedback.textContent = "No se pudo guardar (¿el partido ya inició?).";
+      feedback.classList.add("error");
+    } finally {
+      feedback.hidden = false;
+      saveBtn.disabled = false;
+    }
+  });
+
+  return row;
+}
+
+function renderForm(matches, predictions, userId) {
+  formEl.innerHTML = "";
+  const groups = groupByPhase(matches);
+
+  for (const phase of PHASE_ORDER) {
+    const phaseMatches = groups[phase];
+    if (!phaseMatches?.length) continue;
+
+    const section = document.createElement("section");
+    section.className = "phase-section";
+
+    const heading = document.createElement("h2");
+    heading.textContent = PHASE_LABELS[phase] ?? phase;
+    section.appendChild(heading);
+
+    for (const match of phaseMatches) {
+      section.appendChild(renderMatchRow(match, predictions[match.id], userId));
+    }
+
+    formEl.appendChild(section);
+  }
+
+  formEl.hidden = false;
+}
+
+function renderConflict(token) {
+  showStatus("Este dispositivo ya está vinculado a otro usuario.");
+  const switchBtn = document.createElement("button");
+  switchBtn.type = "button";
+  switchBtn.textContent = "No soy yo, usar mi propio enlace";
+  switchBtn.addEventListener("click", async () => {
+    const retry = await switchAccount(token);
+    if (retry && !retry.conflict) {
+      window.location.reload();
+    }
+  });
+  statusEl.appendChild(document.createElement("br"));
+  statusEl.appendChild(switchBtn);
+}
+
+async function main() {
+  const token = getTokenFromUrl();
+  if (!token) {
+    showStatus("Falta el token en el enlace. Usa el enlace personal que te compartió el organizador.", true);
+    return;
+  }
+
+  showStatus("Cargando...");
+
+  let result;
+  try {
+    result = await signInWithToken(token);
+  } catch (err) {
+    showStatus("Error al iniciar sesión. Intenta recargar la página.", true);
+    return;
+  }
+
+  if (!result) {
+    showStatus("Enlace inválido o expirado. Pide un enlace nuevo al organizador.", true);
+    return;
+  }
+
+  if (result.conflict) {
+    renderConflict(token);
+    return;
+  }
+
+  const { userId } = result;
+
+  try {
+    const matches = await fetchMatches();
+    const predictions = await fetchPredictions(userId, matches);
+    statusEl.hidden = true;
+    renderForm(matches, predictions, userId);
+  } catch (err) {
+    showStatus("No se pudieron cargar los partidos.", true);
+  }
+}
+
+main();
