@@ -5,6 +5,11 @@ admin/serviceAccountKey.json
 node_modules/
 admin/node_modules/
 
+# Lockfiles intentionally not committed — package.json pins exact versions
+# instead, so `npm install` resolves the same tree without a large generated
+# lockfile in the repo.
+package-lock.json
+
 # Firebase emulator local state
 .firebase/
 firebase-debug.log
