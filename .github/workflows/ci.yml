@@ -18,7 +18,7 @@ jobs:
 
       - name: Syntax-check frontend and admin scripts
         run: |
-          for f in js/*.js admin/*.js; do
+          for f in js/*.js admin/*.js automation/*.js; do
             echo "Checking $f"
             node --check "$f"
           done
@@ -30,5 +30,9 @@ jobs:
         run: npm install
         working-directory: admin
 
-      - name: Run Firestore security rules tests
+      - name: Install automation script dependencies
+        run: npm install
+        working-directory: automation
+
+      - name: Run tests (Firestore rules + sync-fixtures pure logic)
         run: npm test

@@ -21,15 +21,15 @@ Explicitly deprioritized for now (build later, don't block on this):
 - Standings dashboard
 - Discord bot integration (planned as a second, parallel input channel later
   — same backend, same `user_id`, just another client)
-- Automatic fixture/results fetching (replacing manual entry via
-  `admin/seed.js` and the Firebase console): a scheduled GitHub Action
-  hitting a free football data API (e.g. football-data.org, API-Football),
-  writing fixture/result updates to Firestore via the Admin SDK (service
-  account key stored as a GitHub Secret). Stays 100% free since the cron
-  runs on GitHub, not Firebase — no Blaze/Cloud Functions needed. Deferred
-  because it adds an external dependency (API rate limits, mapping API team
-  names to our `match_id` scheme) and isn't needed to validate the MVP with
-  the group; revisit after manual entry has been tested end-to-end.
+- ~~Automatic fixture/results fetching~~ — implemented (optional, doesn't
+  block manual entry) in `automation/sync-fixtures.js` +
+  `.github/workflows/sync-fixtures.yml`: a scheduled GitHub Action hitting
+  football-data.org, writing fixture/result updates to Firestore via the
+  Admin SDK (service account key stored as a GitHub Secret). Stays 100% free
+  since the cron runs on GitHub, not Firebase — no Blaze/Cloud Functions
+  needed. See [issue #2](https://github.com/Johansmm/polla-futbolera/issues/2)
+  for the rationale and `README.md`'s "Automatic fixture/results sync"
+  section for setup.
 
 ## Tech stack decisions
 
