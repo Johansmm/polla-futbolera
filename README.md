@@ -50,6 +50,28 @@ VS Code "Live Server" extension) and open `predict.html?token=<a seeded token>`.
 Firebase config must already point at your real project — there's no
 emulator/mocking layer for the MVP.
 
+## Running tests
+
+Security-rules tests run against the local Firestore emulator, which requires
+a JRE (the emulator itself is a Java process — Node/npm alone aren't enough).
+
+```
+winget install EclipseAdoptium.Temurin.21.JRE   # one-time, if `java -version` fails
+npm install                                      # root devDependencies (first time only)
+npm test
+```
+
+This runs `test/firestore.rules.test.js` against `firestore.rules` via
+`@firebase/rules-unit-testing`, covering: unauthenticated reads being denied,
+the token→`auth_links` binding requiring the real token, owners vs. strangers
+writing predictions, the auto-lock check (past `kickoff_at` or `locked: true`),
+and other users' predictions staying hidden until a match kicks off.
+
+GitHub Actions runs the same tests (plus a `node --check` syntax pass over
+`js/*.js` and `admin/*.js`) on every pull request and push to `main` — see
+`.github/workflows/ci.yml`. The Actions runner already has Java preinstalled,
+so no extra setup is needed there.
+
 ## Admin workflows (ongoing)
 
 - **Enter a real match result**: Firebase Console → Firestore → `matches/{match_id}`
@@ -83,6 +105,8 @@ js/auth.js             token -> user_id resolution + anonymous-auth binding
 js/predict.js          predict.html page logic
 firestore.rules         security rules (see CLAUDE.md and the design notes therein)
 admin/seed.js           local-only Admin SDK script: seeds matches, users, tokens
+test/firestore.rules.test.js   security-rules tests (run via `npm test`, needs the emulator)
+.github/workflows/ci.yml       runs the test suite on every PR / push to main
 ```
 
 ## How auth works without passwords, SMS, or a server

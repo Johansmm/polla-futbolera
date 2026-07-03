@@ -5,6 +5,12 @@ admin/serviceAccountKey.json
 node_modules/
 admin/node_modules/
 
+# Firebase emulator local state
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db
