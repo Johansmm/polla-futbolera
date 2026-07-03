@@ -58,19 +58,80 @@ a JRE (the emulator itself is a Java process — Node/npm alone aren't enough).
 ```
 winget install EclipseAdoptium.Temurin.21.JRE   # one-time, if `java -version` fails
 npm install                                      # root devDependencies (first time only)
+cd automation && npm install && cd ..            # sync-fixtures.js's own dependency (first time only)
 npm test
 ```
 
-This runs `test/firestore.rules.test.js` against `firestore.rules` via
-`@firebase/rules-unit-testing`, covering: unauthenticated reads being denied,
-the token→`auth_links` binding requiring the real token, owners vs. strangers
-writing predictions, the auto-lock check (past `kickoff_at` or `locked: true`),
-and other users' predictions staying hidden until a match kicks off.
+`node --test test/` picks up two files:
+
+- `test/firestore.rules.test.js` — runs against `firestore.rules` via
+  `@firebase/rules-unit-testing` (needs the emulator), covering:
+  unauthenticated reads being denied, the token→`auth_links` binding
+  requiring the real token, owners vs. strangers writing predictions, the
+  auto-lock check (past `kickoff_at` or `locked: true`), and other users'
+  predictions staying hidden until a match kicks off.
+- `test/sync-fixtures.test.js` — plain unit tests (no emulator, no
+  credentials) for the pure decision logic in `automation/sync-fixtures.js`:
+  stage-to-phase translation, the "is this match finished yet" check, and
+  the kickoff-time tolerance window used to match an API fixture to an
+  already-seeded `matches` doc.
 
 GitHub Actions runs the same tests (plus a `node --check` syntax pass over
-`js/*.js` and `admin/*.js`) on every pull request and push to `main` — see
-`.github/workflows/ci.yml`. The Actions runner already has Java preinstalled,
-so no extra setup is needed there.
+`js/*.js`, `admin/*.js`, and `automation/*.js`) on every pull request and
+push to `main` — see `.github/workflows/ci.yml`. The Actions runner already
+has Java preinstalled, so no extra setup is needed there.
+
+## Automatic fixture/results sync (optional)
+
+`.github/workflows/sync-fixtures.yml` runs `automation/sync-fixtures.js` every
+3 hours (and on-demand via the Actions tab), pulling **all** World Cup 2026
+matches from [football-data.org](https://www.football-data.org/) and writing
+`team_a`/`team_b`/`kickoff_at`/`real_score_a`/`real_score_b` to Firestore.
+This replaces manual fixture/result entry once set up, but is optional —
+everything still works via `admin/seed.js` + the Firebase console without it.
+
+The sync deliberately doesn't filter by stage (group stage, and the Round of
+32 that World Cup 2026's 48-team format adds before Round of 16, get synced
+too) — relevance is already enforced elsewhere, so filtering here would just
+duplicate that logic:
+
+- `firestore.rules` denies any prediction write once a match's `kickoff_at`
+  has passed, so anything from an earlier stage synced mid-tournament is
+  already unwritable.
+- `js/predict.js` only ever renders matches whose `phase` is one of
+  `r16`/`qf`/`sf`/`third_place`/`final` (its `PHASE_ORDER`); any other value
+  is simply never shown, never something a user can pick to predict on.
+
+`STAGE_TO_PHASE` in the script still translates football-data.org's stage
+codes to those 5 values for the phases we care about — anything it doesn't
+recognize gets synced with its raw API stage string as `phase` instead
+(harmless: it just won't render). Before trusting the schedule, do one manual
+run from the Actions tab and check the logs for any "Unmapped stage(s)" line —
+that confirms whether football-data.org's naming matches what the script
+assumes (see the comment above `STAGE_TO_PHASE` for the English/Spanish round-
+naming mismatch this is guarding against: English "Round of 16" = Spanish
+"octavos de final", *not* "dieciseisavos"/"16avos", which is actually the
+newer Round of 32 stage).
+
+To enable it, add these two **repo Secrets** (Settings → Secrets and variables
+→ Actions → New repository secret):
+
+- `FOOTBALL_DATA_TOKEN` — a free API key from football-data.org (sign up, then
+  copy the key from your account dashboard). Verify their current docs for the
+  exact competition code/plan coverage for the World Cup before relying on it.
+- `FIREBASE_SERVICE_ACCOUNT_JSON` — paste the **entire contents** of your
+  `admin/serviceAccountKey.json` as the secret value (same key used locally by
+  `admin/seed.js`; this grants the workflow the same Admin SDK access).
+
+Matches are matched to existing `matches` docs by `phase` + kickoff time
+(within a few hours' tolerance), not by team name, so pre-seeding a match's
+`kickoff_at` via `admin/seed.js` before the teams are known still lets the
+sync fill in `team_a`/`team_b` later. If no matching doc is found, it creates
+one with an auto-generated `match_id`. Once football-data.org marks a match
+`FINISHED`, its score is treated as authoritative and will overwrite
+`real_score_a`/`real_score_b` on every run — so a manual correction in the
+console could get reverted on the next sync; disable the workflow first if
+you need a manual value to stick.
 
 ## Admin workflows (ongoing)
 
@@ -106,7 +167,9 @@ js/predict.js          predict.html page logic
 firestore.rules         security rules (see CLAUDE.md and the design notes therein)
 admin/seed.js           local-only Admin SDK script: seeds matches, users, tokens
 test/firestore.rules.test.js   security-rules tests (run via `npm test`, needs the emulator)
-.github/workflows/ci.yml       runs the test suite on every PR / push to main
+.github/workflows/ci.yml               runs the test suite on every PR / push to main
+automation/sync-fixtures.js            optional: auto-syncs fixtures/results from football-data.org
+.github/workflows/sync-fixtures.yml    runs automation/sync-fixtures.js on a schedule
 ```
 
 ## How auth works without passwords, SMS, or a server
