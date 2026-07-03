@@ -23,14 +23,38 @@ jobs:
             node --check "$f"
           done
 
+      - name: Cache root node_modules
+        id: cache-root
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-npm-root-${{ hashFiles('package.json') }}
+
       - name: Install root test dependencies
+        if: steps.cache-root.outputs.cache-hit != 'true'
         run: npm install
 
+      - name: Cache admin node_modules
+        id: cache-admin
+        uses: actions/cache@v4
+        with:
+          path: admin/node_modules
+          key: ${{ runner.os }}-npm-admin-${{ hashFiles('admin/package.json') }}
+
       - name: Install admin script dependencies
+        if: steps.cache-admin.outputs.cache-hit != 'true'
         run: npm install
         working-directory: admin
 
+      - name: Cache automation node_modules
+        id: cache-automation
+        uses: actions/cache@v4
+        with:
+          path: automation/node_modules
+          key: ${{ runner.os }}-npm-automation-${{ hashFiles('automation/package.json') }}
+
       - name: Install automation script dependencies
+        if: steps.cache-automation.outputs.cache-hit != 'true'
         run: npm install
         working-directory: automation
 
