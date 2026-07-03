@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/auth_links/$(request.auth.uid))
+        && get(/databases/$(database)/documents/auth_links/$(request.auth.uid)).data.user_id == userId;
+    }
+
+    function matchLocked(matchId) {
+      let m = get(/databases/$(database)/documents/matches/$(matchId)).data;
+      return m.locked == true || request.time > m.kickoff_at;
+    }
+
+    // ---- users (fixed schema, read-only to clients) ----
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow write: if false; // admin only, via console / Admin SDK
+    }
+
+    // ---- tokens: token -> user_id reverse index (auth plumbing) ----
+    match /tokens/{token} {
+      allow get: if signedIn();  // must already know the exact token string
+      allow list: if false;      // never enumerable
+      allow write: if false;     // admin only
+    }
+
+    // ---- auth_links: anonymous auth uid -> user_id binding (auth plumbing) ----
+    match /auth_links/{authUid} {
+      allow get: if signedIn() && request.auth.uid == authUid;
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.auth.uid == authUid
+        && request.resource.data.keys().hasOnly(['user_id', 'token'])
+        && get(/databases/$(database)/documents/tokens/$(request.resource.data.token)).data.user_id
+             == request.resource.data.user_id;
+
+      allow update: if false; // binding is immutable; sign out + rebind instead
+      allow delete: if false; // admin only (token regeneration / revoke)
+    }
+
+    // ---- matches (fixed schema, read-only to clients) ----
+    match /matches/{matchId} {
+      allow read: if signedIn();
+      allow write: if false; // admin only (fixture load + results entry)
+    }
+
+    // ---- predictions (fixed schema) ----
+    match /predictions/{predictionId} {
+      // own predictions always; others' only after that match kicks off.
+      // resource == null when getDoc() targets a prediction that hasn't
+      // been saved yet (the normal case on a user's first visit) — there's
+      // no resource.data to read then, so derive the owner from the doc ID
+      // itself (format "{user_id}_{match_id}"; user_id never contains "_").
+      allow read: if signedIn() && (
+        resource == null
+          ? isOwner(predictionId.split('_')[0])
+          : (isOwner(resource.data.user_id) || matchLocked(resource.data.match_id))
+      );
+
+      allow create: if signedIn()
+        && isOwner(request.resource.data.user_id)
+        && predictionId == request.resource.data.user_id + '_' + request.resource.data.match_id
+        && request.resource.data.match_id is string
+        && request.resource.data.predicted_score_a is int
+        && request.resource.data.predicted_score_a >= 0
+        && request.resource.data.predicted_score_b is int
+        && request.resource.data.predicted_score_b >= 0
+        && request.resource.data.points_earned == null
+        && !matchLocked(request.resource.data.match_id);
+
+      allow update: if signedIn()
+        && isOwner(resource.data.user_id)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['predicted_score_a', 'predicted_score_b'])
+        && !matchLocked(resource.data.match_id);
+
+      allow delete: if false;
+    }
+
+    // ---- special_predictions (fixed schema, one doc per user, doc id = user_id) ----
+    // Owner-only for now; the MVP doesn't build any UI to reveal these to
+    // others, so no "reveal" logic is needed yet.
+    match /special_predictions/{userId} {
+      allow read: if isOwner(userId);
+
+      allow create: if isOwner(userId)
+        && request.resource.data.user_id == userId;
+
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['champion_pick', 'top_scorer_pick']);
+
+      allow delete: if false;
+    }
+  }
+}

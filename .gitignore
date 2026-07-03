@@ -1,0 +1,12 @@
+# Admin secrets — never commit the real service account key
+admin/serviceAccountKey.json
+
+# Node
+node_modules/
+admin/node_modules/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
