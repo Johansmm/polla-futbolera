@@ -1,0 +1,26 @@
+{
+  "match_outcome_points": {
+    "exact_score": 5,
+    "correct_winner_and_difference": 3,
+    "correct_winner_or_draw": 1,
+    "miss": 0
+  },
+  "phase_multipliers": {
+    "r16": 1,
+    "qf": 1.5,
+    "sf": 2,
+    "third_place": 2,
+    "final": 3
+  },
+  "special_predictions": {
+    "champion": {
+      "exact_champion": 8,
+      "finalist": 3
+    },
+    "top_scorer": {
+      "exact": 10,
+      "top_3": 5,
+      "team_reaches_semifinal_or_final_bonus": 3
+    }
+  }
+}

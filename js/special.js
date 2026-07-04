@@ -160,8 +160,6 @@ async function main() {
         user_id: userId,
         champion_pick: championPick,
         top_scorer_pick: topScorerPick,
-        champion_points: null,
-        top_scorer_points: null,
       });
       showStatus(submitFeedback, "Saved. You can change it again until the first Round of 16 match kicks off.");
       submitBtn.textContent = "Update prediction";

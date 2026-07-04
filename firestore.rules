@@ -28,6 +28,18 @@ service cloud.firestore {
       return !exists(configPath) || request.time >= get(configPath).data.locked_after;
     }
 
+    // Opposite default from specialPredictionsLocked(): defaults to NOT
+    // revealed when the deadline hasn't been configured yet, so picks stay
+    // hidden until an admin has actually set (and passed) a real deadline —
+    // the fail-safe direction here is "stay hidden", not "reveal everyone's
+    // picks". Once the same deadline passes, this and specialPredictionsLocked()
+    // agree (both true), which is exactly the "editing closes, reveal opens"
+    // moment the group's rules describe.
+    function specialPredictionsRevealed() {
+      let configPath = /databases/$(database)/documents/config/special_predictions;
+      return exists(configPath) && request.time >= get(configPath).data.locked_after;
+    }
+
     // ---- users (fixed schema, read-only to clients) ----
     match /users/{userId} {
       allow read: if signedIn();
@@ -83,7 +95,6 @@ service cloud.firestore {
         && request.resource.data.predicted_score_a >= 0
         && request.resource.data.predicted_score_b is int
         && request.resource.data.predicted_score_b >= 0
-        && request.resource.data.points_earned == null
         && !matchLocked(request.resource.data.match_id);
 
       allow update: if signedIn()
@@ -96,20 +107,21 @@ service cloud.firestore {
     }
 
     // ---- special_predictions (fixed schema, one doc per user, doc id = user_id) ----
-    // Owner-only for now; the MVP doesn't build any UI to reveal these to
-    // others, so no "reveal" logic is needed yet. Editable (create or
-    // update) until specialPredictionsLocked() — the deadline the group
-    // agreed on (up to the first Round of 16 kickoff), not immediately
-    // frozen after the first save.
+    // Owner-only up until the deadline passes, then readable by everyone —
+    // needed so a future standings page can compute champion/top-scorer
+    // points for every user by reading their raw picks directly (see
+    // js/scoring-logic.mjs), no server-side precomputation/storage of
+    // points involved. Editable (create or update) until
+    // specialPredictionsLocked() — the deadline the group agreed on (up to
+    // the first Round of 16 kickoff), not immediately frozen after the
+    // first save.
     match /special_predictions/{userId} {
-      allow read: if isOwner(userId);
+      allow read: if isOwner(userId) || specialPredictionsRevealed();
 
       allow create: if isOwner(userId)
         && request.resource.data.user_id == userId
         && request.resource.data.champion_pick is string
         && request.resource.data.top_scorer_pick is string
-        && request.resource.data.champion_points == null
-        && request.resource.data.top_scorer_points == null
         && !specialPredictionsLocked();
 
       allow update: if isOwner(userId)

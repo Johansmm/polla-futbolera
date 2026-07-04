@@ -102,7 +102,6 @@ function renderMatchRow(match, prediction, userId) {
           match_id: match.id,
           predicted_score_a: predictedScoreA,
           predicted_score_b: predictedScoreB,
-          points_earned: prediction?.points_earned ?? null,
         },
         { merge: true }
       );

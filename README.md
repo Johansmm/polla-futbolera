@@ -71,7 +71,8 @@ cd automation && npm install && cd ..            # sync-fixtures.js's own depend
 npm test
 ```
 
-`node --test test/` picks up three files:
+`node --test test/` auto-discovers every test file in the directory,
+currently:
 
 - `test/firestore.rules.test.js` — runs against `firestore.rules` via
   `@firebase/rules-unit-testing` (needs the emulator), covering:
@@ -91,6 +92,13 @@ npm test
   dynamic `import()` since it's a real ES module (`.mjs`) in an otherwise
   CommonJS test suite — the only `js/*.js` file with no CDN import, so the
   only one Node can load directly.
+- `test/scoring-logic.test.js` — plain unit tests for `js/scoring-logic.mjs`'s
+  pure scoring functions (`scoreMatch`, `calculateChampionPoints`,
+  `calculateTopScorerPoints`), including the drawn-match edge case where a
+  correctly-predicted draw must not be mistaken for "correct winner +
+  correct difference" just because a draw's goal difference is always 0.
+  Loaded the same way as `lock-logic.test.js` above, since this is also a
+  real `.mjs` module.
 
 GitHub Actions runs the same tests (plus a `node --check` syntax pass over
 `js/*.js`, `admin/*.js`, and `automation/*.js`) on every pull request and
@@ -230,6 +238,16 @@ node missing-predictions.js
     and pick. Everything is copied under the new id before anything is
     deleted from the old one, so a failure partway through leaves
     duplicated data, never lost data.
+- **Points aren't calculated by an admin step at all** — there's nothing to
+  run after entering a match's real score. The (future) standings page reads
+  `matches`/`predictions`/`special_predictions` directly and computes
+  everyone's points on the fly using `js/scoring-logic.mjs` +
+  `scoring_config.json`, so there's no `points_earned` field to recompute or
+  go stale. The one manual step that *is* still needed: once the tournament
+  top scorer is known (not tracked anywhere else in Firestore), set
+  `config/tournament_results → { top_scorer: "...", top_3_scorers: ["...", "...", "..."] }`
+  via the Console — champion/finalists/semifinalists are derived
+  automatically from the `final`/`sf` matches instead.
 
 ## Project structure
 
@@ -244,14 +262,17 @@ js/auth.js             token -> user_id resolution + anonymous-auth binding
 js/token-gate.js       shared token-resolution UI flow used by predict.js and special.js
 js/ui.js               tiny shared DOM helper (showStatus)
 js/lock-logic.mjs      shared timing/lookup logic (isMatchLocked, isPastDeadline, findTeamForPlayer)
+js/scoring-logic.mjs   pure scoring functions (no stored points_earned — computed on read)
 js/predict.js          predict.html page logic
 js/special.js          special.html page logic
 firestore.rules         security rules (see CLAUDE.md and the design notes therein)
 admin/seed.js           local-only Admin SDK script: seeds matches, users, tokens, the
                         special_predictions deadline, and (optionally) team_rosters
 admin/rename-user.js    local-only Admin SDK script: fixes a user's name or user_id
+scoring_config.json         tunable point/multiplier weights, read by js/scoring-logic.mjs
 test/firestore.rules.test.js   security-rules tests (run via `npm test`, needs the emulator)
 test/lock-logic.test.js        unit tests for js/lock-logic.mjs (no emulator needed)
+test/scoring-logic.test.js     unit tests for js/scoring-logic.mjs (no emulator needed)
 .github/workflows/ci.yml               runs the test suite on every PR / push to main
 automation/sync-fixtures.js            optional: auto-syncs fixtures/results from football-data.org
 .github/workflows/sync-fixtures.yml    runs automation/sync-fixtures.js on a schedule

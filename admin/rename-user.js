@@ -65,7 +65,7 @@ async function renameId(oldId, newId, newName) {
   }
 
   // 4. Copy each prediction under its new composite id, preserving the
-  // predicted scores and points_earned untouched.
+  // predicted scores untouched.
   const predictionsSnap = await db.collection("predictions").where("user_id", "==", oldId).get();
   for (const doc of predictionsSnap.docs) {
     const data = doc.data();
