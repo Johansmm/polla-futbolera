@@ -45,6 +45,23 @@ export function scoreMatch(prediction, match, matchOutcomePoints) {
   return { outcomePoints, exactScoreHit: false };
 }
 
+// A locked match without an admin-entered result yet has a publicly
+// readable prediction (see firestore.rules' matchDeadlinePassed) but
+// nothing to score against — that's "pending", distinct from a finished
+// match with no submission at all, which is a genuine miss (0). Conflating
+// the two would count an unscored match as a miss before the admin ever
+// enters a result.
+export function scoreMatchBreakdown(prediction, match, isFinished, matchOutcomePoints, phaseMultiplier) {
+  if (!isFinished) {
+    return { points: null, exactScoreHit: false };
+  }
+  if (!prediction) {
+    return { points: 0, exactScoreHit: false };
+  }
+  const { outcomePoints, exactScoreHit } = scoreMatch(prediction, match, matchOutcomePoints);
+  return { points: outcomePoints * phaseMultiplier, exactScoreHit };
+}
+
 export function calculateChampionPoints(championPick, { champion, finalists }, championConfig) {
   if (championPick === champion) return championConfig.exact_champion;
   if (finalists.includes(championPick)) return championConfig.finalist;

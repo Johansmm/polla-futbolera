@@ -12,7 +12,19 @@
     <p><a id="predict-link" href="predict.html">← Back to my predictions</a></p>
     <p id="status" class="status" hidden></p>
     <p id="standings-note" class="hint" hidden></p>
+    <details class="columns-help">
+      <summary>What do these columns mean?</summary>
+      <ul>
+        <li><strong>Predictions submitted:</strong> how many of the already-locked matches this user actually predicted, out of the total locked so far.</li>
+        <li><strong>Exact hits:</strong> matches where the user guessed the exact final score.</li>
+        <li><strong>vs. Average (pts):</strong> how far this user's total is above (green, +) or below (red, -) the group's average total.</li>
+        <li><strong>Matches (pts):</strong> points earned from match predictions (outcome tier × phase multiplier), summed across every scored match.</li>
+        <li><strong>Special (pts):</strong> combined points from the champion and top scorer picks.</li>
+        <li><strong>Total (pts):</strong> Matches (pts) + Special (pts).</li>
+      </ul>
+    </details>
     <div id="standings-table" hidden></div>
+    <div id="breakdown-sections" hidden></div>
   </main>
   <script>
     const token = new URLSearchParams(window.location.search).get("token");

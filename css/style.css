@@ -133,3 +133,53 @@ td {
 th {
   border-bottom: 2px solid #333;
 }
+
+.delta-positive {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.delta-negative {
+  color: #a4262c;
+  font-weight: 600;
+}
+
+.delta-neutral {
+  color: #666;
+}
+
+.columns-help {
+  margin-top: 8px;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.columns-help summary {
+  cursor: pointer;
+}
+
+.columns-help ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.columns-help li {
+  margin: 4px 0;
+}
+
+.breakdown-section {
+  margin-top: 12px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #ddd;
+}
+
+.breakdown-section summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.breakdown-section table {
+  margin-top: 8px;
+}
