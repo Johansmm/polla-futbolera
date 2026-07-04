@@ -57,6 +57,21 @@ async function bindUser(db, { uid, userId, token }) {
   await db.collection("auth_links").doc(uid).set({ user_id: userId, token });
 }
 
+async function setSpecialPredictionsDeadline(db, date) {
+  await db.collection("config").doc("special_predictions").set({ locked_after: date });
+}
+
+function samplePick(overrides = {}) {
+  return {
+    user_id: "johan",
+    champion_pick: "Argentina",
+    top_scorer_pick: "Messi",
+    champion_points: null,
+    top_scorer_points: null,
+    ...overrides,
+  };
+}
+
 test("unauthenticated client cannot read matches", async () => {
   await seed((db) => db.collection("matches").doc("r16_01").set(futureMatch()));
 
@@ -342,20 +357,97 @@ test("other users' predictions are hidden pre-kickoff but visible once locked", 
 });
 
 test("special_predictions are owner-only", async () => {
-  await seed((db) => bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" }));
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+  });
 
   const johan = testEnv.authenticatedContext("johan-uid").firestore();
   const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
 
+  await assertSucceeds(johan.collection("special_predictions").doc("johan").set(samplePick()));
+  await assertFails(stranger.collection("special_predictions").doc("johan").get());
+});
+
+test("special_predictions create fails by default when no deadline has been configured", async () => {
+  await seed((db) => bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" }));
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  await assertFails(johan.collection("special_predictions").doc("johan").set(samplePick()));
+});
+
+test("special_predictions can be updated before the deadline but not after", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+    await db.collection("special_predictions").doc("johan").set(samplePick());
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  // Before the deadline: changing your pick works.
   await assertSucceeds(
-    johan.collection("special_predictions").doc("johan").set({
-      user_id: "johan",
-      champion_pick: "Argentina",
-      top_scorer_pick: "Messi",
-      champion_points: null,
-      top_scorer_points: null,
-    })
+    johan.collection("special_predictions").doc("johan").update({ champion_pick: "Brazil" })
   );
 
-  await assertFails(stranger.collection("special_predictions").doc("johan").get());
+  // Deadline passes (admin/seed.js would recompute this from the real
+  // fixture; here we just move it into the past to simulate that).
+  await seed((db) => setSpecialPredictionsDeadline(db, new Date(Date.now() - HOUR)));
+
+  await assertFails(
+    johan.collection("special_predictions").doc("johan").update({ champion_pick: "France" })
+  );
+});
+
+test("special_predictions create fails once the deadline has passed", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() - HOUR));
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  await assertFails(johan.collection("special_predictions").doc("johan").set(samplePick()));
+});
+
+test("special_predictions create rejects a non-null points field (no self-scoring)", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  await assertFails(
+    johan.collection("special_predictions").doc("johan").set(samplePick({ champion_points: 8 }))
+  );
+});
+
+test("team_rosters is readable when signed in but never writable by clients", async () => {
+  await seed((db) =>
+    db.collection("team_rosters").doc("France").set({ team: "France", players: ["Kylian Mbappé"] })
+  );
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+  const unauth = testEnv.unauthenticatedContext().firestore();
+
+  await assertSucceeds(johan.collection("team_rosters").doc("France").get());
+  await assertFails(unauth.collection("team_rosters").doc("France").get());
+  await assertFails(
+    johan.collection("team_rosters").doc("France").set({ team: "France", players: [] })
+  );
+});
+
+test("config is readable when signed in but never writable by clients", async () => {
+  await seed((db) => setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR)));
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+  const unauth = testEnv.unauthenticatedContext().firestore();
+
+  await assertSucceeds(johan.collection("config").doc("special_predictions").get());
+  await assertFails(unauth.collection("config").doc("special_predictions").get());
+  await assertFails(
+    johan.collection("config").doc("special_predictions").set({ locked_after: new Date() })
+  );
 });
