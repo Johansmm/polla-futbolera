@@ -48,6 +48,22 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
      pass), using the same `FIREBASE_SERVICE_ACCOUNT_JSON` secret as the
      other automation workflows — no more remembering to run this by hand
      after merging a PR that touches the rules.
+   - The service account behind that secret needs an extra IAM role beyond
+     what the other automation workflows require: Firebase's default
+     Admin SDK service account (`firebase-adminsdk-...@<project>.iam.gserviceaccount.com`,
+     the one whose key you downloaded above) only has Admin SDK access
+     (Firestore/Auth reads and writes) by default, not the
+     `firebaserules.*` permissions the CLI needs to validate and publish
+     rules. Deploying rules from CI fails with a `403` from
+     `firebaserules.googleapis.com` until you grant that same service
+     account the **Firebase Rules Admin** role (Google Cloud Console → IAM
+     & Admin → IAM → find the `firebase-adminsdk-...` account → Edit →
+     Add another role — search "rules"; if that specific role isn't
+     offered, the broader **Firebase Admin** role also works, just with
+     more access than strictly needed). This is a one-time grant tied to
+     the service account itself, not the key — regenerating
+     `admin/serviceAccountKey.json` later doesn't require repeating it.
+     No billing plan or cost is involved; IAM role grants are free.
 
 4. **Enable GitHub Pages**
    - Repo Settings → Pages → Source: "Deploy from a branch" → Branch: `main`,
@@ -154,7 +170,8 @@ To enable it, add these two **repo Secrets** (Settings → Secrets and variables
   `admin/serviceAccountKey.json` as the secret value (same key used locally by
   `admin/seed.js`; this grants the workflow the same Admin SDK access). Also
   required by `.github/workflows/ci.yml`'s `deploy-rules` job (not optional —
-  see the "Deploy the security rules" setup step above), so set this up even
+  see the "Deploy the security rules" setup step above, including the extra
+  IAM role that job needs beyond plain Admin SDK access), so set this up even
   if you don't want the fixture sync itself.
 
 Matches are matched to existing `matches` docs by `phase` + kickoff time
