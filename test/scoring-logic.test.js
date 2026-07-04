@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 // be loaded here via dynamic import() even though this test file itself is
 // CommonJS (per the root package.json).
 let scoreMatch;
+let scoreMatchBreakdown;
 let calculateChampionPoints;
 let calculateTopScorerPoints;
 let finishedMatches;
@@ -12,8 +13,15 @@ let deriveChampion;
 let deriveSemifinalists;
 
 test.before(async () => {
-  ({ scoreMatch, calculateChampionPoints, calculateTopScorerPoints, finishedMatches, deriveChampion, deriveSemifinalists } =
-    await import("../js/scoring-logic.mjs"));
+  ({
+    scoreMatch,
+    scoreMatchBreakdown,
+    calculateChampionPoints,
+    calculateTopScorerPoints,
+    finishedMatches,
+    deriveChampion,
+    deriveSemifinalists,
+  } = await import("../js/scoring-logic.mjs"));
 });
 
 const MATCH_OUTCOME_POINTS = {
@@ -78,6 +86,50 @@ test("scoreMatch awards miss for predicting a draw when there wasn't one", () =>
     MATCH_OUTCOME_POINTS
   );
   assert.deepEqual(result, { outcomePoints: 0, exactScoreHit: false });
+});
+
+test("scoreMatchBreakdown marks an unfinished (locked, no result yet) match as pending, even with a submitted prediction", () => {
+  const result = scoreMatchBreakdown(
+    { predicted_score_a: 2, predicted_score_b: 1 },
+    { real_score_a: null, real_score_b: null },
+    false,
+    MATCH_OUTCOME_POINTS,
+    1
+  );
+  assert.deepEqual(result, { points: null, exactScoreHit: false });
+});
+
+test("scoreMatchBreakdown marks an unfinished match as pending even with no prediction submitted", () => {
+  const result = scoreMatchBreakdown(
+    null,
+    { real_score_a: null, real_score_b: null },
+    false,
+    MATCH_OUTCOME_POINTS,
+    1
+  );
+  assert.deepEqual(result, { points: null, exactScoreHit: false });
+});
+
+test("scoreMatchBreakdown scores a finished match with no submission as a miss (0), not pending", () => {
+  const result = scoreMatchBreakdown(
+    null,
+    { real_score_a: 2, real_score_b: 1 },
+    true,
+    MATCH_OUTCOME_POINTS,
+    1
+  );
+  assert.deepEqual(result, { points: 0, exactScoreHit: false });
+});
+
+test("scoreMatchBreakdown applies the phase multiplier to a finished match's outcome points", () => {
+  const result = scoreMatchBreakdown(
+    { predicted_score_a: 2, predicted_score_b: 1 },
+    { real_score_a: 2, real_score_b: 1 },
+    true,
+    MATCH_OUTCOME_POINTS,
+    2
+  );
+  assert.deepEqual(result, { points: 10, exactScoreHit: true }); // 5 (exact_score) * 2 (multiplier)
 });
 
 test("calculateChampionPoints awards exact_champion for the right pick", () => {
