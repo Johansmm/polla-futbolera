@@ -11,7 +11,8 @@ export function isMatchLocked(match) {
 }
 
 // null/missing deadline is treated as already past — matches
-// firestore.rules' specialPredictionsLocked() fail-closed default.
+// firestore.rules' specialPredictionsDeadlinePassed(true) fail-closed default
+// (the write-gating direction: stay locked with no deadline configured).
 export function isPastDeadline(deadline) {
   return !deadline || Date.now() >= deadline.getTime();
 }

@@ -92,7 +92,7 @@ async function seedMatches() {
 }
 
 // Champion/top-scorer picks (special_predictions) can be created or edited
-// up until this deadline, per firestore.rules' specialPredictionsLocked().
+// up until this deadline, per firestore.rules' specialPredictionsDeadlinePassed().
 // Derived from the actual `matches` collection (not just the MATCHES array
 // above), so it stays correct even if some r16 matches were created by
 // automation/sync-fixtures.js instead of this script.

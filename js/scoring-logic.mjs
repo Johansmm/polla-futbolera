@@ -1,7 +1,8 @@
 // Pure scoring logic — no network/Firestore calls, no stored/precomputed
 // points anywhere. A future standings page reads matches/predictions
-// (public once a match is locked) and special_predictions (public once
-// specialPredictionsRevealed(), see firestore.rules) directly, and calls
+// (public once a match's deadline passes) and special_predictions (public
+// once specialPredictionsDeadlinePassed(false), see firestore.rules) directly,
+// and calls
 // these functions to compute everyone's points on the fly. Kept in its own
 // dependency-free module (note the .mjs extension, same reasoning as
 // lock-logic.mjs) so it can be unit-tested directly with node:test via
