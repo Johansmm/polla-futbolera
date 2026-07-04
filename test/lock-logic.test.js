@@ -36,9 +36,18 @@ test("isMatchLocked accepts a Firestore Timestamp-like object (.toDate())", () =
   assert.equal(isMatchLocked({ locked: false, kickoff_at: timestampLike }), true);
 });
 
-test("isPastDeadline treats a missing deadline as already past", () => {
+test("isPastDeadline treats a missing deadline as already past by default", () => {
   assert.equal(isPastDeadline(null), true);
   assert.equal(isPastDeadline(undefined), true);
+});
+
+// standings.js needs the opposite default for a missing deadline (not
+// revealed, matching firestore.rules' specialPredictionsDeadlinePassed(false))
+// — this caught a real bug where reusing the default-true behavior made the
+// client attempt a special_predictions read that Firestore denied outright.
+test("isPastDeadline honors an explicit defaultIfUnset for a missing deadline", () => {
+  assert.equal(isPastDeadline(null, false), false);
+  assert.equal(isPastDeadline(undefined, false), false);
 });
 
 test("isPastDeadline is false before the deadline", () => {

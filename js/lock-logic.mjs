@@ -10,11 +10,17 @@ export function isMatchLocked(match) {
   return Date.now() >= kickoff.getTime();
 }
 
-// null/missing deadline is treated as already past — matches
-// firestore.rules' specialPredictionsDeadlinePassed(true) fail-closed default
-// (the write-gating direction: stay locked with no deadline configured).
-export function isPastDeadline(deadline) {
-  return !deadline || Date.now() >= deadline.getTime();
+// Mirrors firestore.rules' specialPredictionsDeadlinePassed(defaultIfUnset):
+// a missing deadline (config/special_predictions doesn't exist) can't be
+// "past" or "not past" on its own, so callers must say what to assume.
+// special.js gates editing and defaults to true (stay locked with no
+// deadline configured, matching the rules' write-gate default) — passing
+// no second argument preserves that. A caller gating what's *readable*
+// (e.g. standings.js) must pass false instead, matching the rules' read-gate
+// default, or Firestore will deny the read the client didn't expect to be
+// denied.
+export function isPastDeadline(deadline, defaultIfUnset = true) {
+  return deadline ? Date.now() >= deadline.getTime() : defaultIfUnset;
 }
 
 export function findTeamForPlayer(rosters, player) {

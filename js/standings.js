@@ -73,7 +73,10 @@ async function computeStandings() {
     await Promise.all(finished.map(async (match) => [match.id, await fetchPredictionsByMatch(match.id)]))
   );
 
-  const specialRevealed = isPastDeadline(specialDeadline);
+  // false when unset: an unconfigured deadline must read as "not revealed"
+  // here, or Firestore denies the special_predictions list query outright
+  // (see firestore.rules' specialPredictionsDeadlinePassed(false)).
+  const specialRevealed = isPastDeadline(specialDeadline, false);
   const specialPicks = specialRevealed ? await fetchSpecialPredictions() : {};
 
   const { champion, finalists } = deriveChampion(matches);
@@ -182,6 +185,7 @@ async function main() {
   try {
     result = await computeStandings();
   } catch (err) {
+    console.error(err);
     showStatus(statusEl, "Couldn't load the standings.", true);
     return;
   }
