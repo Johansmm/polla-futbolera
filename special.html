@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Campeón y Goleador — Poya Mundial 2026</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Campeón y Goleador del Torneo</h1>
+    <p><a id="predict-link" href="predict.html">← Volver a mis predicciones</a></p>
+    <p class="hint">Podés cambiar tu elección las veces que quieras hasta que empiece el primer partido de octavos.</p>
+    <p id="status" class="status" hidden></p>
+
+    <form id="special-form" hidden>
+      <section class="phase-section">
+        <h2>Campeón</h2>
+        <select id="champion-select"></select>
+      </section>
+
+      <section class="phase-section">
+        <h2>Goleador del Torneo</h2>
+        <select id="scorer-team-select"></select>
+        <select id="scorer-player-select" disabled></select>
+      </section>
+
+      <button type="submit" id="submit-btn">Guardar predicción</button>
+      <div id="submit-feedback" class="save-feedback" hidden></div>
+    </form>
+
+    <div id="locked-view" hidden></div>
+  </main>
+  <script>
+    const token = new URLSearchParams(window.location.search).get("token");
+    if (token) {
+      document.getElementById("predict-link").href = `predict.html?token=${encodeURIComponent(token)}`;
+    }
+  </script>
+  <script type="module" src="js/special.js"></script>
+</body>
+</html>

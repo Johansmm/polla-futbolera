@@ -21,3 +21,6 @@ ui-debug.log
 Thumbs.db
 .vscode/
 .idea/
+
+# Personal Claude Code permission overrides — not shared with the team
+.claude/settings.local.json

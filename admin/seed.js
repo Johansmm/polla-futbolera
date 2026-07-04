@@ -45,6 +45,13 @@ const USERS = [
   // ... add the rest of the group here.
 ];
 
+// Optional: if set, also seeds team_rosters (see seedTeamRosters() below) so
+// the champion/top-scorer picks form has real team/player names to pick
+// from. Get a free key from https://www.football-data.org/ — leave unset to
+// skip that step entirely (matches/users/tokens still seed normally).
+const FOOTBALL_DATA_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
+const COMPETITION_CODE = "WC"; // FIFA World Cup, per football-data.org's docs
+
 function generateToken() {
   return crypto.randomBytes(16).toString("base64url");
 }
@@ -85,6 +92,67 @@ async function seedMatches() {
   console.log(`Matches: ${created} created, ${updated} updated (results/locked untouched).`);
 }
 
+// Champion/top-scorer picks (special_predictions) can be created or edited
+// up until this deadline, per firestore.rules' specialPredictionsLocked().
+// Derived from the actual `matches` collection (not just the MATCHES array
+// above), so it stays correct even if some r16 matches were created by
+// automation/sync-fixtures.js instead of this script.
+async function seedSpecialPredictionsDeadline() {
+  const snap = await db.collection("matches").where("phase", "==", "r16").get();
+  const kickoffs = snap.docs
+    .map((doc) => doc.data().kickoff_at)
+    .filter(Boolean)
+    .map((ts) => ts.toDate().getTime());
+
+  if (!kickoffs.length) {
+    console.log("No r16 matches with a kickoff_at yet — skipping special_predictions deadline.");
+    return;
+  }
+
+  const earliest = new Date(Math.min(...kickoffs));
+
+  await db.collection("config").doc("special_predictions").set({
+    locked_after: admin.firestore.Timestamp.fromDate(earliest),
+  });
+
+  console.log(`special_predictions locks at ${earliest.toISOString()} (first r16 kickoff).`);
+}
+
+// Populates team_rosters/{team} so the special-predictions form (champion +
+// top scorer picks, see GitHub issue #7) can build both dropdowns from real
+// data instead of free text — no typos, no name-format mismatches. Fetches
+// every World Cup 2026 team and its squad in a single API call (confirmed
+// against the real API: /v4/competitions/WC/teams returns full squads on
+// the free tier, no per-team requests needed).
+async function seedTeamRosters() {
+  if (!FOOTBALL_DATA_TOKEN) {
+    console.log("FOOTBALL_DATA_TOKEN not set — skipping team_rosters seed.");
+    return;
+  }
+
+  const res = await fetch(`https://api.football-data.org/v4/competitions/${COMPETITION_CODE}/teams`, {
+    headers: { "X-Auth-Token": FOOTBALL_DATA_TOKEN },
+  });
+
+  if (!res.ok) {
+    throw new Error(`football-data.org request failed: ${res.status} ${await res.text()}`);
+  }
+
+  const { teams } = await res.json();
+  const batch = db.batch();
+
+  for (const team of teams) {
+    const ref = db.collection("team_rosters").doc(team.name);
+    batch.set(ref, {
+      team: team.name,
+      players: (team.squad ?? []).map((p) => p.name),
+    });
+  }
+
+  await batch.commit();
+  console.log(`Seeded rosters for ${teams.length} teams.`);
+}
+
 async function seedUsers() {
   for (const user of USERS) {
     const userRef = db.collection("users").doc(user.user_id);
@@ -112,6 +180,8 @@ async function seedUsers() {
 
 async function main() {
   await seedMatches();
+  await seedSpecialPredictionsDeadline();
+  await seedTeamRosters();
   await seedUsers();
   console.log("\nDone. Save the printed links now — tokens aren't printed again unless you add a brand-new user.");
 }

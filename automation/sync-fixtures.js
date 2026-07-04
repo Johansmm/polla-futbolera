@@ -28,10 +28,11 @@ const COMPETITION_CODE = "WC"; // FIFA World Cup, per football-data.org's docs
 // Translates football-data.org's stage codes to this project's `phase`
 // values (r16/qf/sf/third_place/final, per CLAUDE.md) so js/predict.js's
 // PHASE_ORDER recognizes and displays them correctly. Any API stage NOT
-// listed here (group stage, Round of 32 — the new 48-team stage before
-// Round of 16 — etc.) is synced too, just with its raw API stage string
-// left as `phase`; predict.js won't render it, so it's effectively inert,
-// not hidden by filtering it out of the sync itself (see file header).
+// listed here (group stage, Round of 32 — the extra stage this expanded
+// tournament format adds before Round of 16 — etc.) is synced too, just
+// with its raw API stage string left as `phase`; predict.js won't render
+// it, so it's effectively inert, not hidden by filtering it out of the
+// sync itself (see file header).
 //
 // English round names count teams *entering* the round ("Round of 16" = 16
 // teams play it); Spanish names count what fraction of the bracket remains

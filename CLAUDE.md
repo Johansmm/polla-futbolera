@@ -45,6 +45,16 @@ Explicitly deprioritized for now (build later, don't block on this):
   - Predictions from other users are hidden until the match's kickoff time
   - No writes allowed to a match after `locked = true`
 
+## Code conventions
+
+- Comments and docs should describe things generically rather than
+  hardcoding facts specific to one tournament's format that could change or
+  go stale later (e.g. say "every team" / "the expanded format" instead of
+  "48 teams" / "the 48-team format"). World Cup 2026 added a Round of 32
+  that didn't exist before; a future tournament could just as easily change
+  team counts, phase names, or match counts again — comments shouldn't need
+  editing just because a number like that changed.
+
 ## Data schema (Firestore collections)
 
 ### `users`
@@ -82,6 +92,21 @@ Explicitly deprioritized for now (build later, don't block on this):
 | `top_scorer_pick` | string | |
 | `champion_points` | number\|null | |
 | `top_scorer_points` | number\|null | |
+
+Chosen once, during Round of 16, via `special.html` — immutable after
+creation (`firestore.rules` allows `create` but not `update` on this
+collection, so a pick can never be changed once submitted).
+
+### `team_rosters` (doc id = team name, admin-seeded via `admin/seed.js`)
+| Field | Type | Notes |
+|---|---|---|
+| `team` | string | Same team name string used as `matches.team_a`/`team_b` |
+| `players` | array\<string\> | Full squad, from football-data.org |
+
+Backs `special.html`'s champion/top-scorer dropdowns (real team/player names
+instead of free text, so there's no typo/spelling mismatch when scoring
+later). Read-only to clients, admin-only write, like every other reference
+collection.
 
 ## Scoring rules (design finalized, NOT yet locked with the group — keep flexible)
 

@@ -17,6 +17,17 @@ service cloud.firestore {
       return m.locked == true || request.time > m.kickoff_at;
     }
 
+    // Champion/top-scorer picks can be created or changed up until this
+    // deadline (admin/seed.js sets it to the earliest Round of 16 kickoff
+    // currently in `matches`) — after that, special_predictions is frozen.
+    // Treated as locked by default if the deadline hasn't been configured
+    // yet (config/special_predictions doesn't exist) — fails closed rather
+    // than silently allowing edits with no deadline in place.
+    function specialPredictionsLocked() {
+      let configPath = /databases/$(database)/documents/config/special_predictions;
+      return !exists(configPath) || request.time >= get(configPath).data.locked_after;
+    }
+
     // ---- users (fixed schema, read-only to clients) ----
     match /users/{userId} {
       allow read: if signedIn();
@@ -86,18 +97,41 @@ service cloud.firestore {
 
     // ---- special_predictions (fixed schema, one doc per user, doc id = user_id) ----
     // Owner-only for now; the MVP doesn't build any UI to reveal these to
-    // others, so no "reveal" logic is needed yet.
+    // others, so no "reveal" logic is needed yet. Editable (create or
+    // update) until specialPredictionsLocked() — the deadline the group
+    // agreed on (up to the first Round of 16 kickoff), not immediately
+    // frozen after the first save.
     match /special_predictions/{userId} {
       allow read: if isOwner(userId);
 
       allow create: if isOwner(userId)
-        && request.resource.data.user_id == userId;
+        && request.resource.data.user_id == userId
+        && request.resource.data.champion_pick is string
+        && request.resource.data.top_scorer_pick is string
+        && request.resource.data.champion_points == null
+        && request.resource.data.top_scorer_points == null
+        && !specialPredictionsLocked();
 
       allow update: if isOwner(userId)
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['champion_pick', 'top_scorer_pick']);
+             .hasOnly(['champion_pick', 'top_scorer_pick'])
+        && !specialPredictionsLocked();
 
       allow delete: if false;
+    }
+
+    // ---- team_rosters (team -> player names, admin-seeded from football-data.org) ----
+    // Backs the champion/top-scorer picks form's dropdowns (see admin/seed.js)
+    // so users pick from real team/player names instead of typing free text.
+    match /team_rosters/{teamName} {
+      allow read: if signedIn();
+      allow write: if false; // admin only, via admin/seed.js
+    }
+
+    // ---- config (small admin-set values, e.g. the special_predictions deadline) ----
+    match /config/{configId} {
+      allow read: if signedIn();
+      allow write: if false; // admin only
     }
   }
 }

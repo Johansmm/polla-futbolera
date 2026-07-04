@@ -8,7 +8,9 @@ import {
   orderBy,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
-import { signInWithToken, switchAccount } from "./auth.js";
+import { resolveUserFromToken } from "./token-gate.js";
+import { showStatus } from "./ui.js";
+import { isMatchLocked } from "./lock-logic.mjs";
 
 const PHASE_LABELS = {
   r16: "Octavos de Final",
@@ -22,24 +24,6 @@ const PHASE_ORDER = ["r16", "qf", "sf", "third_place", "final"];
 
 const statusEl = document.getElementById("status");
 const formEl = document.getElementById("predictions-form");
-
-function getTokenFromUrl() {
-  return new URLSearchParams(window.location.search).get("token");
-}
-
-function showStatus(message, isError = false) {
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", isError);
-  statusEl.hidden = false;
-}
-
-function isMatchLocked(match) {
-  if (match.locked) return true;
-  const kickoff = match.kickoff_at?.toDate
-    ? match.kickoff_at.toDate()
-    : new Date(match.kickoff_at);
-  return Date.now() >= kickoff.getTime();
-}
 
 async function fetchMatches() {
   const snap = await getDocs(query(collection(db, "matches"), orderBy("kickoff_at")));
@@ -160,49 +144,9 @@ function renderForm(matches, predictions, userId) {
   formEl.hidden = false;
 }
 
-function renderConflict(token) {
-  showStatus("Este dispositivo ya está vinculado a otro usuario.");
-  const switchBtn = document.createElement("button");
-  switchBtn.type = "button";
-  switchBtn.textContent = "No soy yo, usar mi propio enlace";
-  switchBtn.addEventListener("click", async () => {
-    const retry = await switchAccount(token);
-    if (retry && !retry.conflict) {
-      window.location.reload();
-    }
-  });
-  statusEl.appendChild(document.createElement("br"));
-  statusEl.appendChild(switchBtn);
-}
-
 async function main() {
-  const token = getTokenFromUrl();
-  if (!token) {
-    showStatus("Falta el token en el enlace. Usa el enlace personal que te compartió el organizador.", true);
-    return;
-  }
-
-  showStatus("Cargando...");
-
-  let result;
-  try {
-    result = await signInWithToken(token);
-  } catch (err) {
-    showStatus("Error al iniciar sesión. Intenta recargar la página.", true);
-    return;
-  }
-
-  if (!result) {
-    showStatus("Enlace inválido o expirado. Pide un enlace nuevo al organizador.", true);
-    return;
-  }
-
-  if (result.conflict) {
-    renderConflict(token);
-    return;
-  }
-
-  const { userId } = result;
+  const userId = await resolveUserFromToken(statusEl);
+  if (!userId) return;
 
   try {
     const matches = await fetchMatches();
@@ -210,7 +154,7 @@ async function main() {
     statusEl.hidden = true;
     renderForm(matches, predictions, userId);
   } catch (err) {
-    showStatus("No se pudieron cargar los partidos.", true);
+    showStatus(statusEl, "No se pudieron cargar los partidos.", true);
   }
 }
 
