@@ -133,3 +133,20 @@ td {
 th {
   border-bottom: 2px solid #333;
 }
+
+.breakdown-section {
+  margin-top: 12px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #ddd;
+}
+
+.breakdown-section summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.breakdown-section table {
+  margin-top: 8px;
+}
