@@ -30,6 +30,13 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
    - `cd admin && npm install && node seed.js`
    - The script prints each friend's `predict.html?token=...` link — save
      these, they aren't shown again unless you add a brand-new user later.
+   - Optional: run it as `FOOTBALL_DATA_TOKEN=<your token> node seed.js`
+     (free key from [football-data.org](https://www.football-data.org/)) to
+     also seed `team_rosters/{team}` — every team's squad in one API call,
+     backing the champion/top-scorer dropdowns on `special.html`.
+     Without the token this step is skipped (logged), everything else still
+     seeds normally. Only needs re-running if a squad changes materially
+     (e.g. a late injury replacement).
 
 3. **Deploy the security rules**
    - Requires the [Firebase CLI](https://firebase.google.com/docs/cli):
@@ -62,19 +69,26 @@ cd automation && npm install && cd ..            # sync-fixtures.js's own depend
 npm test
 ```
 
-`node --test test/` picks up two files:
+`node --test test/` picks up three files:
 
 - `test/firestore.rules.test.js` — runs against `firestore.rules` via
   `@firebase/rules-unit-testing` (needs the emulator), covering:
   unauthenticated reads being denied, the token→`auth_links` binding
   requiring the real token, owners vs. strangers writing predictions, the
-  auto-lock check (past `kickoff_at` or `locked: true`), and other users'
-  predictions staying hidden until a match kicks off.
+  auto-lock check (past `kickoff_at` or `locked: true`), other users'
+  predictions staying hidden until a match kicks off, and
+  `special_predictions` being editable only before its configured deadline.
 - `test/sync-fixtures.test.js` — plain unit tests (no emulator, no
   credentials) for the pure decision logic in `automation/sync-fixtures.js`:
   stage-to-phase translation, the "is this match finished yet" check, and
   the kickoff-time tolerance window used to match an API fixture to an
   already-seeded `matches` doc.
+- `test/lock-logic.test.js` — plain unit tests for `js/lock-logic.mjs`'s
+  timing/lookup logic (`isMatchLocked`, `isPastDeadline`,
+  `findTeamForPlayer`), shared by `predict.js` and `special.js`. Loaded via
+  dynamic `import()` since it's a real ES module (`.mjs`) in an otherwise
+  CommonJS test suite — the only `js/*.js` file with no CDN import, so the
+  only one Node can load directly.
 
 GitHub Actions runs the same tests (plus a `node --check` syntax pass over
 `js/*.js`, `admin/*.js`, and `automation/*.js`) on every pull request and
@@ -91,7 +105,7 @@ This replaces manual fixture/result entry once set up, but is optional —
 everything still works via `admin/seed.js` + the Firebase console without it.
 
 The sync deliberately doesn't filter by stage (group stage, and the Round of
-32 that World Cup 2026's 48-team format adds before Round of 16, get synced
+32 that World Cup 2026's expanded format adds before Round of 16, get synced
 too) — relevance is already enforced elsewhere, so filtering here would just
 duplicate that logic:
 
@@ -153,20 +167,33 @@ you need a manual value to stick.
   existing ones only get `phase`/`team_a`/`team_b`/`kickoff_at` refreshed;
   `real_score_a`, `real_score_b` and `locked` are never touched once a match
   already exists, so results you entered via the console are preserved.
+- **The champion/top-scorer picks deadline** (`config/special_predictions.locked_after`)
+  recomputes automatically every time `node seed.js` runs, from whatever the
+  earliest Round of 16 `kickoff_at` is in `matches` at that moment — no
+  manual date entry needed. If `matches` has no `r16` docs yet when you run
+  it, this step is skipped (logged), and `special.html` stays locked by
+  default (fail-closed) until it exists.
 
 ## Project structure
 
 ```
 index.html          landing page; redirects to predict.html?token=... if present
-predict.html         main prediction form
+predict.html         main prediction form (score picks)
+special.html         champion + top-scorer picks (editable until the deadline)
 css/style.css
 js/firebase-config.js  public Firebase web config (not a secret)
 js/firebase-init.js    Firebase SDK init
 js/auth.js             token -> user_id resolution + anonymous-auth binding
+js/token-gate.js       shared token-resolution UI flow used by predict.js and special.js
+js/ui.js               tiny shared DOM helper (showStatus)
+js/lock-logic.mjs      shared timing/lookup logic (isMatchLocked, isPastDeadline, findTeamForPlayer)
 js/predict.js          predict.html page logic
+js/special.js          special.html page logic
 firestore.rules         security rules (see CLAUDE.md and the design notes therein)
-admin/seed.js           local-only Admin SDK script: seeds matches, users, tokens
+admin/seed.js           local-only Admin SDK script: seeds matches, users, tokens, the
+                        special_predictions deadline, and (optionally) team_rosters
 test/firestore.rules.test.js   security-rules tests (run via `npm test`, needs the emulator)
+test/lock-logic.test.js        unit tests for js/lock-logic.mjs (no emulator needed)
 .github/workflows/ci.yml               runs the test suite on every PR / push to main
 automation/sync-fixtures.js            optional: auto-syncs fixtures/results from football-data.org
 .github/workflows/sync-fixtures.yml    runs automation/sync-fixtures.js on a schedule
