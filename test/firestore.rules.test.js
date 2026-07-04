@@ -66,8 +66,6 @@ function samplePick(overrides = {}) {
     user_id: "johan",
     champion_pick: "Argentina",
     top_scorer_pick: "Messi",
-    champion_points: null,
-    top_scorer_points: null,
     ...overrides,
   };
 }
@@ -129,7 +127,6 @@ test("owner can create a prediction before kickoff; a stranger cannot", async ()
     match_id: "r16_01",
     predicted_score_a: 2,
     predicted_score_b: 1,
-    points_earned: null,
   };
 
   await assertSucceeds(johan.collection("predictions").doc("johan_r16_01").set(prediction));
@@ -166,7 +163,6 @@ test("writes are rejected once a match is past kickoff or force-locked", async (
       match_id: "r16_01",
       predicted_score_a: 1,
       predicted_score_b: 1,
-      points_earned: null,
     })
   );
 
@@ -177,7 +173,6 @@ test("writes are rejected once a match is past kickoff or force-locked", async (
       match_id: "r16_02",
       predicted_score_a: 1,
       predicted_score_b: 1,
-      points_earned: null,
     })
   );
 });
@@ -192,7 +187,6 @@ test("updating an existing prediction is rejected once the match's kickoff time 
       match_id: "r16_01",
       predicted_score_a: 1,
       predicted_score_b: 0,
-      points_earned: null,
     });
   });
 
@@ -253,7 +247,6 @@ test("prediction create rejects invalid scores", async () => {
       match_id: "r16_01",
       predicted_score_a: -1,
       predicted_score_b: 0,
-      points_earned: null,
     })
   );
 
@@ -264,27 +257,6 @@ test("prediction create rejects invalid scores", async () => {
       match_id: "r16_01",
       predicted_score_a: 1.5,
       predicted_score_b: 0,
-      points_earned: null,
-    })
-  );
-});
-
-test("prediction create rejects a non-null points_earned (no self-scoring)", async () => {
-  await seed(async (db) => {
-    await db.collection("matches").doc("r16_01").set(futureMatch());
-    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
-  });
-
-  const johan = testEnv.authenticatedContext("johan-uid").firestore();
-
-  await assertFails(
-    johan.collection("predictions").doc("johan_r16_01").set({
-      prediction_id: "johan_r16_01",
-      user_id: "johan",
-      match_id: "r16_01",
-      predicted_score_a: 1,
-      predicted_score_b: 0,
-      points_earned: 15,
     })
   );
 });
@@ -299,7 +271,6 @@ test("prediction update cannot smuggle in changes to user_id, match_id, or point
       match_id: "r16_01",
       predicted_score_a: 1,
       predicted_score_b: 0,
-      points_earned: null,
     });
   });
 
@@ -335,7 +306,6 @@ test("other users' predictions are hidden pre-kickoff but visible once locked", 
       match_id: "r16_01",
       predicted_score_a: 2,
       predicted_score_b: 0,
-      points_earned: null,
     });
     await db.collection("predictions").doc("johan_r16_02").set({
       prediction_id: "johan_r16_02",
@@ -343,7 +313,6 @@ test("other users' predictions are hidden pre-kickoff but visible once locked", 
       match_id: "r16_02",
       predicted_score_a: 1,
       predicted_score_b: 1,
-      points_earned: null,
     });
   });
 
@@ -356,7 +325,7 @@ test("other users' predictions are hidden pre-kickoff but visible once locked", 
   await assertSucceeds(kevin.collection("predictions").doc("johan_r16_02").get());
 });
 
-test("special_predictions are owner-only", async () => {
+test("special_predictions is hidden from others before the reveal deadline", async () => {
   await seed(async (db) => {
     await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
     await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
@@ -366,6 +335,33 @@ test("special_predictions are owner-only", async () => {
   const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
 
   await assertSucceeds(johan.collection("special_predictions").doc("johan").set(samplePick()));
+  await assertFails(stranger.collection("special_predictions").doc("johan").get());
+});
+
+test("special_predictions becomes readable by everyone once the reveal deadline passes", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() - HOUR));
+    await db.collection("special_predictions").doc("johan").set(samplePick());
+  });
+
+  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+
+  // A future standings page needs this to compute champion/top-scorer
+  // points for every user, not just the signed-in one.
+  await assertSucceeds(stranger.collection("special_predictions").doc("johan").get());
+});
+
+test("special_predictions stays hidden if no deadline has ever been configured", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    // Bypass the create rule directly (as the admin would via console/seed
+    // script) so a pick can exist even with no config/special_predictions
+    // doc — the reveal check must fail closed (hidden), not fail open.
+    await db.collection("special_predictions").doc("johan").set(samplePick());
+  });
+
+  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
   await assertFails(stranger.collection("special_predictions").doc("johan").get());
 });
 
@@ -409,19 +405,6 @@ test("special_predictions create fails once the deadline has passed", async () =
   const johan = testEnv.authenticatedContext("johan-uid").firestore();
 
   await assertFails(johan.collection("special_predictions").doc("johan").set(samplePick()));
-});
-
-test("special_predictions create rejects a non-null points field (no self-scoring)", async () => {
-  await seed(async (db) => {
-    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
-    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
-  });
-
-  const johan = testEnv.authenticatedContext("johan-uid").firestore();
-
-  await assertFails(
-    johan.collection("special_predictions").doc("johan").set(samplePick({ champion_points: 8 }))
-  );
 });
 
 test("team_rosters is readable when signed in but never writable by clients", async () => {
