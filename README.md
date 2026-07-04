@@ -42,8 +42,12 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
    - Requires the [Firebase CLI](https://firebase.google.com/docs/cli):
      `npm install -g firebase-tools`, then `firebase login`.
    - `firebase deploy --only firestore:rules`
-   - Whenever `firestore.rules` changes, re-run this — it's a separate step
-     from deploying the website.
+   - This one-time manual run is only needed for the very first deploy.
+     After that, `.github/workflows/ci.yml`'s `deploy-rules` job redeploys
+     `firestore.rules` automatically on every push to `main` (once tests
+     pass), using the same `FIREBASE_SERVICE_ACCOUNT_JSON` secret as the
+     other automation workflows — no more remembering to run this by hand
+     after merging a PR that touches the rules.
 
 4. **Enable GitHub Pages**
    - Repo Settings → Pages → Source: "Deploy from a branch" → Branch: `main`,
@@ -103,7 +107,10 @@ currently:
 GitHub Actions runs the same tests (plus a `node --check` syntax pass over
 `js/*.js`, `admin/*.js`, and `automation/*.js`) on every pull request and
 push to `main` — see `.github/workflows/ci.yml`. The Actions runner already
-has Java preinstalled, so no extra setup is needed there.
+has Java preinstalled, so no extra setup is needed there. On push to `main`
+specifically, a second job (`deploy-rules`) runs after tests pass and
+redeploys `firestore.rules` automatically — see "Deploy the security rules"
+above.
 
 ## Automatic fixture/results sync (optional)
 
@@ -145,7 +152,10 @@ To enable it, add these two **repo Secrets** (Settings → Secrets and variables
   exact competition code/plan coverage for the World Cup before relying on it.
 - `FIREBASE_SERVICE_ACCOUNT_JSON` — paste the **entire contents** of your
   `admin/serviceAccountKey.json` as the secret value (same key used locally by
-  `admin/seed.js`; this grants the workflow the same Admin SDK access).
+  `admin/seed.js`; this grants the workflow the same Admin SDK access). Also
+  required by `.github/workflows/ci.yml`'s `deploy-rules` job (not optional —
+  see the "Deploy the security rules" setup step above), so set this up even
+  if you don't want the fixture sync itself.
 
 Matches are matched to existing `matches` docs by `phase` + kickoff time
 (within a few hours' tolerance), not by team name, so pre-seeding a match's
