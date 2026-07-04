@@ -83,3 +83,35 @@ h1 {
 .save-feedback.error {
   color: #a4262c;
 }
+
+.hint {
+  color: #666;
+  font-size: 0.9rem;
+  margin-top: -8px;
+}
+
+select {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-top: 8px;
+  font-size: 1rem;
+}
+
+#submit-btn {
+  margin-top: 24px;
+  padding: 10px 16px;
+  font-size: 1rem;
+}
+
+#locked-view {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #ddd;
+}
+
+#locked-view p {
+  margin: 8px 0;
+}
