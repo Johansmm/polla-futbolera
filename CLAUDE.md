@@ -82,7 +82,11 @@ Explicitly deprioritized for now (build later, don't block on this):
 | `user_id` | string | FK to users |
 | `match_id` | string | FK to matches |
 | `predicted_score_a` / `predicted_score_b` | number | Winner is DERIVED from this, not stored separately |
-| `points_earned` | number\|null | Calculated after match closes (later phase) |
+
+No `points_earned` field — points are computed on the fly by whatever reads
+this data (see "Scoring rules" below), never precomputed/stored. Readable by
+everyone once `matches.{match_id}` is locked, not just the owner (see
+`firestore.rules`), which is what makes that live computation possible.
 
 ### `special_predictions` (one doc per user, set once at tournament start)
 | Field | Type | Notes |
@@ -90,12 +94,15 @@ Explicitly deprioritized for now (build later, don't block on this):
 | `user_id` | string | |
 | `champion_pick` | string | |
 | `top_scorer_pick` | string | |
-| `champion_points` | number\|null | |
-| `top_scorer_points` | number\|null | |
 
-Chosen once, during Round of 16, via `special.html` — immutable after
-creation (`firestore.rules` allows `create` but not `update` on this
-collection, so a pick can never be changed once submitted).
+No `champion_points`/`top_scorer_points` fields, same reasoning as
+`predictions` above. Chosen via `special.html`, editable (create or update)
+until `config/special_predictions.locked_after` — the group's agreed
+deadline (the first Round of 16 kickoff, recomputed automatically by
+`admin/seed.js` from whatever's currently in `matches`). Locked for editing
+by default if that deadline hasn't been configured yet. Readable by everyone
+once that same deadline has passed (defaults to hidden, not revealed, if the
+deadline was never configured) — otherwise owner-only.
 
 ### `team_rosters` (doc id = team name, admin-seeded via `admin/seed.js`)
 | Field | Type | Notes |
@@ -108,41 +115,95 @@ instead of free text, so there's no typo/spelling mismatch when scoring
 later). Read-only to clients, admin-only write, like every other reference
 collection.
 
-## Scoring rules (design finalized, NOT yet locked with the group — keep flexible)
+### `config` (small admin-set documents, doc id = purpose)
+| Doc | Field | Notes |
+|---|---|---|
+| `special_predictions` | `locked_after` (timestamp) | See `special_predictions` above |
+| `tournament_results` | `top_scorer` (string), `top_3_scorers` (array\<string\>) | Set by admin once known — nothing else in Firestore tracks individual goals. Champion/finalists/semifinalists are *not* stored here; they're derived on the fly from the `final`/`sf` matches' real scores |
 
-Store in a single config file (e.g. `scoring_config.json`) so weights can be
-tuned without touching code. Current placeholder values (Johan wants to
-negotiate final numbers with friends before locking):
+Read-only to clients, admin-only write, like every other reference
+collection.
+
+## Scoring rules (LOCKED with the group)
+
+Stored in `scoring_config.json` at the repo root so weights stay tunable
+without touching code:
 
 ```json
 {
-  "base_points": {
-    "exact_score": 3,
-    "correct_winner": 1
+  "match_outcome_points": {
+    "exact_score": 5,
+    "correct_winner_and_difference": 3,
+    "correct_winner_or_draw": 1,
+    "miss": 0
   },
   "phase_multipliers": {
     "r16": 1,
-    "qf": 2,
-    "sf": 3,
-    "third_place": 3,
-    "final": 4
+    "qf": 1.5,
+    "sf": 2,
+    "third_place": 2,
+    "final": 3
   },
   "special_predictions": {
-    "champion": 15,
-    "top_scorer": 10
+    "champion": {
+      "exact_champion": 8,
+      "finalist": 3
+    },
+    "top_scorer": {
+      "exact": 10,
+      "top_3": 5,
+      "team_reaches_semifinal_or_final_bonus": 3
+    }
   }
 }
 ```
 
-Formula per match:
+Per-match formula — outcome tiers are mutually exclusive, the highest
+applicable tier wins, they never stack:
+
 ```
-points = (exact_score_hit ? base_points.exact_score : 0
-        + correct_winner_hit ? base_points.correct_winner : 0)
-        * phase_multipliers[match.phase]
+points = outcome_points(prediction, match) * phase_multipliers[match.phase]
 ```
 
-`correct_winner_hit` is derived by comparing `predicted_score_a` vs
-`predicted_score_b` (no separate stored field for the pick).
+Where `outcome_points` is, in order: `exact_score` if the scoreline matches
+exactly; else `correct_winner_and_difference` if the goal difference matches
+and the match had a decisive winner (a correctly-predicted **draw** always
+falls through to the tier below instead, regardless of the exact draw
+score — a draw's difference is always 0, so it isn't a meaningful "correct
+margin" the way it is for a decisive result); else `correct_winner_or_draw`
+if just the winner (or draw) was right; else `miss`. `third_place` shares
+`sf`'s multiplier — played the same week as the Final, but not the
+tournament decider.
+
+`champion_pick`/`top_scorer_pick` (in `special_predictions`, see schema
+above) score independently of match phase — no multiplier applies:
+
+- **Champion**: `exact_champion` if the pick matches the actual champion;
+  `finalist` if the pick reached the Final but didn't win it; otherwise 0.
+- **Top scorer**: `exact` for the exact tournament top scorer, `top_3` for
+  landing in the top 3 without being exact, plus a
+  `team_reaches_semifinal_or_final_bonus` **on top of** either of those two
+  tiers (never on its own) if that player's team reached the Semifinal or
+  Final.
+
+Ties in total points are broken by whoever has the most exact-score
+predictions across the whole tournament — computed the same way as the
+points themselves, by comparing `predicted_score_a`/`b` to `real_score_a`/`b`
+directly, not from a stored field.
+
+**Computed on the fly, not stored anywhere.** `predictions` and
+`special_predictions` intentionally have no `points_earned`/`champion_points`/
+`top_scorer_points` fields (see their schemas above) — whoever displays
+scores (the standings page) reads `matches` + `predictions` (both public
+once a match is locked) and `special_predictions` (public once its deadline
+has passed) directly and computes points itself using the pure functions in
+`js/scoring-logic.mjs`, parameterized by `scoring_config.json`. This avoids
+ever needing an admin step to "recalculate" anything, and there's no
+derived data that can go stale relative to the raw predictions. Champion/
+finalists/semifinalists are derived from the `final`/`sf` matches' real
+scores at read time; the tournament top scorer/top-3 aren't tracked
+anywhere else in Firestore, so an admin sets those once in
+`config/tournament_results` when known.
 
 ## Explicitly rejected approaches (context for why, so we don't re-litigate)
 
