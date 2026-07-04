@@ -87,11 +87,11 @@ currently:
   the kickoff-time tolerance window used to match an API fixture to an
   already-seeded `matches` doc.
 - `test/lock-logic.test.js` — plain unit tests for `js/lock-logic.mjs`'s
-  timing/lookup logic (`isMatchLocked`, `isPastDeadline`,
-  `findTeamForPlayer`), shared by `predict.js` and `special.js`. Loaded via
-  dynamic `import()` since it's a real ES module (`.mjs`) in an otherwise
-  CommonJS test suite — the only `js/*.js` file with no CDN import, so the
-  only one Node can load directly.
+  timing/lookup logic (`isMatchLocked`, `isPastDeadline`, `findTeamForPlayer`),
+  shared by `predict.js`, `special.js`, and `standings.js`. Loaded via dynamic
+  `import()` since it's a real ES module (`.mjs`) in an otherwise CommonJS
+  test suite — the only `js/*.js` file with no CDN import, so the only one
+  Node can load directly.
 - `test/scoring-logic.test.js` — plain unit tests for `js/scoring-logic.mjs`'s
   pure scoring functions (`scoreMatch`, `calculateChampionPoints`,
   `calculateTopScorerPoints`), including the drawn-match edge case where a
@@ -239,7 +239,7 @@ node missing-predictions.js
     deleted from the old one, so a failure partway through leaves
     duplicated data, never lost data.
 - **Points aren't calculated by an admin step at all** — there's nothing to
-  run after entering a match's real score. The (future) standings page reads
+  run after entering a match's real score. `standings.html` reads
   `matches`/`predictions`/`special_predictions` directly and computes
   everyone's points on the fly using `js/scoring-logic.mjs` +
   `scoring_config.json`, so there's no `points_earned` field to recompute or
@@ -255,16 +255,20 @@ node missing-predictions.js
 index.html          landing page; redirects to predict.html?token=... if present
 predict.html         main prediction form (score picks)
 special.html         champion + top-scorer picks (editable until the deadline)
+standings.html        leaderboard (points computed on read, no server step)
 css/style.css
 js/firebase-config.js  public Firebase web config (not a secret)
 js/firebase-init.js    Firebase SDK init
 js/auth.js             token -> user_id resolution + anonymous-auth binding
-js/token-gate.js       shared token-resolution UI flow used by predict.js and special.js
+js/token-gate.js       shared token-resolution UI flow used by predict.js, special.js, and standings.js
 js/ui.js               tiny shared DOM helper (showStatus)
+js/queries.js          Firestore reads shared by special.js and standings.js (deadline, rosters)
 js/lock-logic.mjs      shared timing/lookup logic (isMatchLocked, isPastDeadline, findTeamForPlayer)
 js/scoring-logic.mjs   pure scoring functions (no stored points_earned — computed on read)
 js/predict.js          predict.html page logic
 js/special.js          special.html page logic
+js/standings.js        standings.html page logic: fetches raw predictions/picks/results and
+                        scores them client-side with js/scoring-logic.mjs
 firestore.rules         security rules (see CLAUDE.md and the design notes therein)
 admin/seed.js           local-only Admin SDK script: seeds matches, users, tokens, the
                         special_predictions deadline, and (optionally) team_rosters
