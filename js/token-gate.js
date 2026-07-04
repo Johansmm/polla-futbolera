@@ -15,30 +15,30 @@ export async function resolveUserFromToken(statusEl) {
   const token = getTokenFromUrl();
 
   if (!token) {
-    showStatus(statusEl, "Falta el token en el enlace. Usa el enlace personal que te compartió el organizador.", true);
+    showStatus(statusEl, "Missing token in the link. Use the personal link the organizer sent you.", true);
     return null;
   }
 
-  showStatus(statusEl, "Cargando...");
+  showStatus(statusEl, "Loading...");
 
   let result;
   try {
     result = await signInWithToken(token);
   } catch (err) {
-    showStatus(statusEl, "Error al iniciar sesión. Intenta recargar la página.", true);
+    showStatus(statusEl, "Error signing in. Try reloading the page.", true);
     return null;
   }
 
   if (!result) {
-    showStatus(statusEl, "Enlace inválido o expirado. Pide un enlace nuevo al organizador.", true);
+    showStatus(statusEl, "Invalid or expired link. Ask the organizer for a new one.", true);
     return null;
   }
 
   if (result.conflict) {
-    showStatus(statusEl, "Este dispositivo ya está vinculado a otro usuario.");
+    showStatus(statusEl, "This device is already linked to a different user.");
     const switchBtn = document.createElement("button");
     switchBtn.type = "button";
-    switchBtn.textContent = "No soy yo, usar mi propio enlace";
+    switchBtn.textContent = "Not me, use my own link";
     switchBtn.addEventListener("click", async () => {
       const retry = await switchAccount(token);
       if (retry && !retry.conflict) {
