@@ -1,12 +1,28 @@
 name: Sync World Cup Fixtures
 
+# Two independent jobs, each on its own cron, gated by which schedule fired
+# (github.event.schedule) so a given trigger only runs its own job:
+#   - full-sync: every 3h, unconditional. The one that discovers matches no
+#     one's synced before and fills in team_a/team_b as the bracket
+#     resolves — there's no local state to check before calling the API for
+#     that, so it always polls, but it's a single bulk request per run
+#     regardless of how many matches exist, so a 3-hourly cadence is cheap.
+#   - fast-sync: every 15 min, but --only-if-pending first checks Firestore
+#     for a match whose kickoff has passed with no result yet
+#     (hasPendingResult) and skips the football-data.org call otherwise.
+#     This is what gets a just-finished match's score in within minutes
+#     instead of waiting for the next full-sync tick.
+# A manual run from the Actions tab (workflow_dispatch) always runs
+# full-sync, since that's the more thorough of the two.
 on:
   schedule:
     - cron: "30 1/3 * * *" # every 3 hours, offset from :00
+    - cron: "*/15 * * * *" # every 15 minutes
   workflow_dispatch: {} # allow manual runs from the Actions tab
 
 jobs:
-  sync:
+  full-sync:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 1/3 * * *'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,3 +41,24 @@ jobs:
           FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
         run: node sync-fixtures.js
+
+  fast-sync:
+    if: github.event.schedule == '*/15 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: automation
+
+      - name: Sync results if a match is pending
+        working-directory: automation
+        env:
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: node sync-fixtures.js --only-if-pending

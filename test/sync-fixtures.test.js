@@ -6,6 +6,7 @@ const {
   buildFixturePatch,
   findMatchingDoc,
   generateMatchId,
+  hasPendingResult,
 } = require("../automation/sync-fixtures.js");
 
 test("resolvePhase translates the five knockout stages this project cares about", () => {
@@ -89,4 +90,37 @@ test("generateMatchId picks the next free suffix in a phase", () => {
 
 test("generateMatchId fills a gap left by a previously deleted match", () => {
   assert.equal(generateMatchId("qf", new Set(["qf_01", "qf_03"])), "qf_02");
+});
+
+test("hasPendingResult is true once kickoff has passed with no result yet", () => {
+  const now = new Date("2026-07-10T20:00:00Z");
+  const matches = [{ kickoffAt: new Date("2026-07-10T18:00:00Z"), real_score_a: null }];
+  assert.equal(hasPendingResult(matches, now), true);
+});
+
+test("hasPendingResult is false once the result has been recorded", () => {
+  const now = new Date("2026-07-10T20:00:00Z");
+  const matches = [{ kickoffAt: new Date("2026-07-10T18:00:00Z"), real_score_a: 2 }];
+  assert.equal(hasPendingResult(matches, now), false);
+});
+
+test("hasPendingResult is false before kickoff, even with no result yet", () => {
+  const now = new Date("2026-07-10T20:00:00Z");
+  const matches = [{ kickoffAt: new Date("2026-07-11T18:00:00Z"), real_score_a: null }];
+  assert.equal(hasPendingResult(matches, now), false);
+});
+
+test("hasPendingResult ignores matches with no kickoff time synced yet", () => {
+  const now = new Date("2026-07-10T20:00:00Z");
+  assert.equal(hasPendingResult([{ kickoffAt: null, real_score_a: null }], now), false);
+});
+
+test("hasPendingResult is true if any match in the list is pending", () => {
+  const now = new Date("2026-07-10T20:00:00Z");
+  const matches = [
+    { kickoffAt: new Date("2026-07-09T18:00:00Z"), real_score_a: 1 }, // already resolved
+    { kickoffAt: new Date("2026-07-10T18:00:00Z"), real_score_a: null }, // pending
+    { kickoffAt: new Date("2026-07-11T18:00:00Z"), real_score_a: null }, // not kicked off yet
+  ];
+  assert.equal(hasPendingResult(matches, now), true);
 });
