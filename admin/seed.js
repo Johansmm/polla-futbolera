@@ -40,8 +40,7 @@ const MATCHES = [
 // of a not-yet-created prediction from splitting the doc ID ("{user_id}_{match_id}")
 // on "_", which only works if user_id itself has none.
 const USERS = [
-  { user_id: "johan", name: "Johan" },
-  { user_id: "kevin", name: "Kevin" },
+  { user_id: "jmejia", name: "Johan Mejia" },
   // ... add the rest of the group here.
 ];
 

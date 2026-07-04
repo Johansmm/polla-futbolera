@@ -218,6 +218,18 @@ node missing-predictions.js
   manual date entry needed. If `matches` has no `r16` docs yet when you run
   it, this step is skipped (logged), and `special.html` stays locked by
   default (fail-closed) until it exists.
+- **Fix a user's name or `user_id`**: `cd admin && node rename-user.js ...`
+  - `node rename-user.js name <user_id> "New Name"` — just updates the
+    cosmetic `name` field (shown in `seed.js` logs and the
+    missing-predictions report). Doesn't touch tokens, predictions, or
+    anything else.
+  - `node rename-user.js id <old_id> <new_id> [new_name]` — renames the
+    `user_id` itself everywhere it's referenced (`users`, `tokens`,
+    `auth_links`, `predictions`, `special_predictions`), keeping the same
+    token (so nobody's link breaks) and preserving every predicted score
+    and pick. Everything is copied under the new id before anything is
+    deleted from the old one, so a failure partway through leaves
+    duplicated data, never lost data.
 
 ## Project structure
 
@@ -237,6 +249,7 @@ js/special.js          special.html page logic
 firestore.rules         security rules (see CLAUDE.md and the design notes therein)
 admin/seed.js           local-only Admin SDK script: seeds matches, users, tokens, the
                         special_predictions deadline, and (optionally) team_rosters
+admin/rename-user.js    local-only Admin SDK script: fixes a user's name or user_id
 test/firestore.rules.test.js   security-rules tests (run via `npm test`, needs the emulator)
 test/lock-logic.test.js        unit tests for js/lock-logic.mjs (no emulator needed)
 .github/workflows/ci.yml               runs the test suite on every PR / push to main
