@@ -48,7 +48,9 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
 4. **Enable GitHub Pages**
    - Repo Settings → Pages → Source: "Deploy from a branch" → Branch: `main`,
      folder `/ (root)`.
-   - The site will be served at `https://<username>.github.io/Polla/`.
+   - The site will be served at `https://johansmm.github.io/polla-futbolera/`
+     (the repo name, `polla-futbolera` — not the local folder name used
+     during development).
 
 ## Local testing
 
