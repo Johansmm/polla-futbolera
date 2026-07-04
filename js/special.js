@@ -55,13 +55,13 @@ function renderForm(rosters, existingPick) {
 
   function populateScorerPlayers(team) {
     const players = [...(rostersByTeam[team] ?? [])].sort();
-    populateSelect(scorerPlayerSelect, players, "Elige un jugador...");
+    populateSelect(scorerPlayerSelect, players, "Choose a player...");
     scorerPlayerSelect.disabled = players.length === 0;
   }
 
-  populateSelect(championSelect, teamNames, "Elige un equipo...");
-  populateSelect(scorerTeamSelect, teamNames, "Elige un país...");
-  populateSelect(scorerPlayerSelect, [], "Elige un país primero...");
+  populateSelect(championSelect, teamNames, "Choose a team...");
+  populateSelect(scorerTeamSelect, teamNames, "Choose a country...");
+  populateSelect(scorerPlayerSelect, [], "Choose a country first...");
   scorerPlayerSelect.disabled = true;
 
   scorerTeamSelect.addEventListener("change", () => populateScorerPlayers(scorerTeamSelect.value));
@@ -76,7 +76,7 @@ function renderForm(rosters, existingPick) {
       scorerPlayerSelect.value = existingPick.top_scorer_pick;
     }
 
-    submitBtn.textContent = "Actualizar predicción";
+    submitBtn.textContent = "Update prediction";
   }
 
   formEl.hidden = false;
@@ -85,11 +85,11 @@ function renderForm(rosters, existingPick) {
 function renderLocked(pick) {
   lockedView.innerHTML = pick
     ? `
-      <p>El plazo para elegir ya cerró.</p>
-      <p><strong>Campeón:</strong> ${pick.champion_pick}</p>
-      <p><strong>Goleador:</strong> ${pick.top_scorer_pick}</p>
+      <p>The deadline to pick has closed.</p>
+      <p><strong>Champion:</strong> ${pick.champion_pick}</p>
+      <p><strong>Top scorer:</strong> ${pick.top_scorer_pick}</p>
     `
-    : `<p>El plazo para elegir campeón y goleador ya cerró y no llegaste a elegir.</p>`;
+    : `<p>The deadline to pick a champion and top scorer has closed and you didn't make a pick in time.</p>`;
   lockedView.hidden = false;
 }
 
@@ -105,7 +105,7 @@ async function main() {
       fetchDeadline(),
     ]);
   } catch (err) {
-    showStatus(statusEl, "No se pudo cargar tu predicción.", true);
+    showStatus(statusEl, "Couldn't load your prediction.", true);
     return;
   }
 
@@ -121,7 +121,7 @@ async function main() {
   try {
     rosters = await fetchRosters();
   } catch (err) {
-    showStatus(statusEl, "No se pudieron cargar los equipos.", true);
+    showStatus(statusEl, "Couldn't load the teams.", true);
     return;
   }
 
@@ -129,7 +129,7 @@ async function main() {
   // just returns zero docs — so this needs its own check, or the form would
   // render with two dropdowns that have no options at all.
   if (!rosters.length) {
-    showStatus(statusEl, "Los equipos todavía no están disponibles. Avisale al organizador.", true);
+    showStatus(statusEl, "Teams aren't available yet. Ask the organizer.", true);
     return;
   }
 
@@ -145,13 +145,13 @@ async function main() {
     submitFeedback.classList.remove("error");
 
     if (!championPick || !topScorerPick) {
-      showStatus(submitFeedback, "Elegí un campeón y un goleador antes de guardar.", true);
+      showStatus(submitFeedback, "Pick a champion and a top scorer before saving.", true);
       return;
     }
 
     const confirmMessage = existingPick
-      ? `¿Confirmás el cambio?\n\nCampeón: ${championPick}\nGoleador: ${topScorerPick}`
-      : `¿Confirmás tu predicción?\n\nCampeón: ${championPick}\nGoleador: ${topScorerPick}`;
+      ? `Confirm the change?\n\nChampion: ${championPick}\nTop scorer: ${topScorerPick}`
+      : `Confirm your prediction?\n\nChampion: ${championPick}\nTop scorer: ${topScorerPick}`;
     if (!window.confirm(confirmMessage)) return;
 
     submitBtn.disabled = true;
@@ -163,10 +163,10 @@ async function main() {
         champion_points: null,
         top_scorer_points: null,
       });
-      showStatus(submitFeedback, "Guardado. Podés cambiarlo de nuevo hasta que empiece el primer partido de octavos.");
-      submitBtn.textContent = "Actualizar predicción";
+      showStatus(submitFeedback, "Saved. You can change it again until the first Round of 16 match kicks off.");
+      submitBtn.textContent = "Update prediction";
     } catch (err) {
-      showStatus(submitFeedback, "No se pudo guardar. Intenta de nuevo.", true);
+      showStatus(submitFeedback, "Couldn't save. Please try again.", true);
     } finally {
       submitBtn.disabled = false;
     }

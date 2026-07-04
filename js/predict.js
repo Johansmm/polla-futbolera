@@ -13,10 +13,10 @@ import { showStatus } from "./ui.js";
 import { isMatchLocked } from "./lock-logic.mjs";
 
 const PHASE_LABELS = {
-  r16: "Octavos de Final",
-  qf: "Cuartos de Final",
-  sf: "Semifinales",
-  third_place: "Tercer Puesto",
+  r16: "Round of 16",
+  qf: "Quarterfinals",
+  sf: "Semifinals",
+  third_place: "Third Place",
   final: "Final",
 };
 
@@ -61,9 +61,9 @@ function renderMatchRow(match, prediction, userId) {
       <input type="number" min="0" class="score-a" value="${prediction?.predicted_score_a ?? ""}" ${locked ? "disabled" : ""} />
       <span>-</span>
       <input type="number" min="0" class="score-b" value="${prediction?.predicted_score_b ?? ""}" ${locked ? "disabled" : ""} />
-      <button type="button" class="save-btn" ${locked ? "disabled" : ""}>Guardar</button>
+      <button type="button" class="save-btn" ${locked ? "disabled" : ""}>Save</button>
     </div>
-    ${locked ? '<div class="locked-label">Bloqueado</div>' : ""}
+    ${locked ? '<div class="locked-label">Locked</div>' : ""}
     <div class="save-feedback" hidden></div>
   `;
 
@@ -86,7 +86,7 @@ function renderMatchRow(match, prediction, userId) {
       predictedScoreA < 0 ||
       predictedScoreB < 0
     ) {
-      feedback.textContent = "Ingresa un marcador válido.";
+      feedback.textContent = "Enter a valid score.";
       feedback.classList.add("error");
       feedback.hidden = false;
       return;
@@ -106,9 +106,9 @@ function renderMatchRow(match, prediction, userId) {
         },
         { merge: true }
       );
-      feedback.textContent = "Guardado.";
+      feedback.textContent = "Saved.";
     } catch (err) {
-      feedback.textContent = "No se pudo guardar (¿el partido ya inició?).";
+      feedback.textContent = "Couldn't save (has the match already kicked off?).";
       feedback.classList.add("error");
     } finally {
       feedback.hidden = false;
@@ -154,7 +154,7 @@ async function main() {
     statusEl.hidden = true;
     renderForm(matches, predictions, userId);
   } catch (err) {
-    showStatus(statusEl, "No se pudieron cargar los partidos.", true);
+    showStatus(statusEl, "Couldn't load the matches.", true);
   }
 }
 
