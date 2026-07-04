@@ -147,6 +147,39 @@ one with an auto-generated `match_id`. Once football-data.org marks a match
 console could get reverted on the next sync; disable the workflow first if
 you need a manual value to stick.
 
+## Missing predictions report (manual)
+
+`.github/workflows/missing-predictions.yml` runs `automation/missing-predictions.js`
+on demand only (`workflow_dispatch` — no schedule) — trigger it from the
+Actions tab, including from the GitHub mobile app, so you don't need your
+computer on to check who still needs a nudge. Per user, lists which matches
+kicking off in the next 24 hours they still have no `predictions` doc for —
+one line per user, ready to paste into a nudge message.
+
+It deliberately only checks whether a prediction document **exists** — the
+script never calls `.data()` on a `predictions` doc, so there's no code path
+that could print anyone's actual predicted score. You see who's missing a
+pick, never what anyone picked.
+
+Uses the same `FIREBASE_SERVICE_ACCOUNT_JSON` secret as the fixture sync — no
+extra setup needed if that's already configured.
+
+To run it locally instead of via Actions (using your local
+`admin/serviceAccountKey.json` instead of the GitHub Secret):
+
+```bash
+# Git Bash
+cd automation
+FIREBASE_SERVICE_ACCOUNT_JSON="$(cat ../admin/serviceAccountKey.json)" node missing-predictions.js
+```
+
+```powershell
+# PowerShell
+cd automation
+$env:FIREBASE_SERVICE_ACCOUNT_JSON = Get-Content ../admin/serviceAccountKey.json -Raw
+node missing-predictions.js
+```
+
 ## Admin workflows (ongoing)
 
 - **Enter a real match result**: Firebase Console → Firestore → `matches/{match_id}`
@@ -197,6 +230,8 @@ test/lock-logic.test.js        unit tests for js/lock-logic.mjs (no emulator nee
 .github/workflows/ci.yml               runs the test suite on every PR / push to main
 automation/sync-fixtures.js            optional: auto-syncs fixtures/results from football-data.org
 .github/workflows/sync-fixtures.yml    runs automation/sync-fixtures.js on a schedule
+automation/missing-predictions.js          reports who's missing a pick for matches in the next 24h
+.github/workflows/missing-predictions.yml  runs automation/missing-predictions.js on demand only
 ```
 
 ## How auth works without passwords, SMS, or a server
