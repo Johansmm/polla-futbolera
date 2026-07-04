@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const assert = require("node:assert/strict");
 const {
   initializeTestEnvironment,
   assertSucceeds,
@@ -323,6 +324,97 @@ test("other users' predictions are hidden pre-kickoff but visible once locked", 
 
   // r16_02 already kicked off — now it's visible to everyone signed in.
   await assertSucceeds(kevin.collection("predictions").doc("johan_r16_02").get());
+});
+
+// A standings page needs to fetch every user's prediction for a locked
+// match in one query, not just its own — these confirm the `list` (query)
+// case behaves the same as the single-doc `get()` case above. Firestore
+// evaluates list rules against the query's *potential* result set, and
+// matchDeadlinePassed(matchId) is the same value for every doc a
+// `.where("match_id", "==", matchId)` query can possibly return, so this is
+// expected to hold — but it was never actually exercised until now.
+//
+// The querying user below is never bound via bindUser()/auth_links on
+// purpose: matchDeadlinePassed(...) alone satisfies the read rule's
+// `isOwner(...) || matchDeadlinePassed(...)`, regardless of who's asking,
+// so an unbound stranger is the more precise test of what's actually being
+// verified here. seed() also bypasses rules entirely, so no binding is
+// needed to write the fixture docs either.
+test("a list query for a locked match's predictions returns every user's prediction", async () => {
+  await seed(async (db) => {
+    await db.collection("matches").doc("r16_01").set(
+      futureMatch({ kickoff_at: new Date(Date.now() - HOUR) })
+    );
+
+    await db.collection("predictions").doc("johan_r16_01").set({
+      prediction_id: "johan_r16_01",
+      user_id: "johan",
+      match_id: "r16_01",
+      predicted_score_a: 2,
+      predicted_score_b: 0,
+    });
+    await db.collection("predictions").doc("kevin_r16_01").set({
+      prediction_id: "kevin_r16_01",
+      user_id: "kevin",
+      match_id: "r16_01",
+      predicted_score_a: 1,
+      predicted_score_b: 1,
+    });
+  });
+
+  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+
+  const snap = await assertSucceeds(
+    stranger.collection("predictions").where("match_id", "==", "r16_01").get()
+  );
+  assert.equal(snap.size, 2);
+});
+
+test("a list query for a not-yet-locked match's predictions is denied", async () => {
+  await seed(async (db) => {
+    await db.collection("matches").doc("r16_01").set(futureMatch());
+
+    await db.collection("predictions").doc("johan_r16_01").set({
+      prediction_id: "johan_r16_01",
+      user_id: "johan",
+      match_id: "r16_01",
+      predicted_score_a: 2,
+      predicted_score_b: 0,
+    });
+  });
+
+  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+
+  await assertFails(stranger.collection("predictions").where("match_id", "==", "r16_01").get());
+});
+
+// Same reasoning for special_predictions: the standings page needs every
+// user's champion/top-scorer pick in one unconstrained list query once the
+// reveal deadline has passed, not just its own doc. Again, the querying
+// stranger is deliberately never bound — specialPredictionsDeadlinePassed()
+// alone must carry the read rule here.
+test("a list query for special_predictions returns every pick once the reveal deadline passes", async () => {
+  await seed(async (db) => {
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() - HOUR));
+    await db.collection("special_predictions").doc("johan").set(samplePick());
+    await db.collection("special_predictions").doc("kevin").set(samplePick({ user_id: "kevin" }));
+  });
+
+  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+
+  const snap = await assertSucceeds(stranger.collection("special_predictions").get());
+  assert.equal(snap.size, 2);
+});
+
+test("a list query for special_predictions is denied before the reveal deadline", async () => {
+  await seed(async (db) => {
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+    await db.collection("special_predictions").doc("johan").set(samplePick());
+  });
+
+  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+
+  await assertFails(stranger.collection("special_predictions").get());
 });
 
 test("special_predictions is hidden from others before the reveal deadline", async () => {
