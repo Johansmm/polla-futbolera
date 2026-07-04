@@ -103,9 +103,10 @@ currently:
   `special_predictions` being editable only before its configured deadline.
 - `test/sync-fixtures.test.js` — plain unit tests (no emulator, no
   credentials) for the pure decision logic in `automation/sync-fixtures.js`:
-  stage-to-phase translation, the "is this match finished yet" check, and
-  the kickoff-time tolerance window used to match an API fixture to an
-  already-seeded `matches` doc.
+  stage-to-phase translation, the "is this match finished yet" check, the
+  kickoff-time tolerance window used to match an API fixture to an
+  already-seeded `matches` doc, and the pending-result check that gates the
+  fast sync workflow.
 - `test/lock-logic.test.js` — plain unit tests for `js/lock-logic.mjs`'s
   timing/lookup logic (`isMatchLocked`, `isPastDeadline`, `findTeamForPlayer`),
   shared by `predict.js`, `special.js`, and `standings.js`. Loaded via dynamic
@@ -130,12 +131,26 @@ above.
 
 ## Automatic fixture/results sync (optional)
 
-`.github/workflows/sync-fixtures.yml` runs `automation/sync-fixtures.js` every
-3 hours (and on-demand via the Actions tab), pulling **all** World Cup 2026
+`.github/workflows/sync-fixtures.yml` runs `automation/sync-fixtures.js` via
+two independent jobs on different schedules, pulling **all** World Cup 2026
 matches from [football-data.org](https://www.football-data.org/) and writing
 `team_a`/`team_b`/`kickoff_at`/`real_score_a`/`real_score_b` to Firestore.
 This replaces manual fixture/result entry once set up, but is optional —
 everything still works via `admin/seed.js` + the Firebase console without it.
+
+- `full-sync` runs unconditionally every 3 hours (and on-demand via the
+  Actions tab). This is the one that discovers matches no one's synced
+  before and fills in `team_a`/`team_b` as the bracket resolves — there's no
+  local state to check before calling the API for that, so it always polls,
+  but it's a single bulk request per run regardless of how many matches
+  exist, so a 3-hourly cadence is cheap.
+- `fast-sync` runs every 15 minutes, but calls `sync-fixtures.js
+  --only-if-pending`, which first checks Firestore for any match whose
+  `kickoff_at` has already passed with no `real_score_a` set yet
+  (`hasPendingResult`) and skips the football-data.org call entirely if
+  there isn't one. This is what gets a just-finished match's score into
+  Firestore within minutes instead of waiting for the next 3-hourly tick,
+  without spending extra API calls between matches.
 
 The sync deliberately doesn't filter by stage (group stage, and the Round of
 32 that World Cup 2026's expanded format adds before Round of 16, get synced
@@ -160,8 +175,8 @@ naming mismatch this is guarding against: English "Round of 16" = Spanish
 "octavos de final", *not* "dieciseisavos"/"16avos", which is actually the
 newer Round of 32 stage).
 
-To enable it, add these two **repo Secrets** (Settings → Secrets and variables
-→ Actions → New repository secret):
+To enable them, add these two **repo Secrets** (Settings → Secrets and variables
+→ Actions → New repository secret), shared by both workflows:
 
 - `FOOTBALL_DATA_TOKEN` — a free API key from football-data.org (sign up, then
   copy the key from your account dashboard). Verify their current docs for the
@@ -306,7 +321,7 @@ test/lock-logic.test.js        unit tests for js/lock-logic.mjs (no emulator nee
 test/scoring-logic.test.js     unit tests for js/scoring-logic.mjs (no emulator needed)
 .github/workflows/ci.yml               runs the test suite on every PR / push to main
 automation/sync-fixtures.js            optional: auto-syncs fixtures/results from football-data.org
-.github/workflows/sync-fixtures.yml    runs automation/sync-fixtures.js on a schedule
+.github/workflows/sync-fixtures.yml    runs it via 2 jobs: every 3h (unconditional) + every 15min (if pending)
 automation/missing-predictions.js          reports who's missing a pick for matches in the next 24h
 .github/workflows/missing-predictions.yml  runs automation/missing-predictions.js on demand only
 ```
