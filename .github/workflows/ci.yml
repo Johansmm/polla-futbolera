@@ -18,7 +18,7 @@ jobs:
 
       - name: Syntax-check frontend and admin scripts
         run: |
-          for f in js/*.js admin/*.js automation/*.js; do
+          for f in js/*.js js/*.mjs admin/*.js automation/*.js; do
             echo "Checking $f"
             node --check "$f"
           done
