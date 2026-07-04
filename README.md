@@ -155,13 +155,23 @@ you need a manual value to stick.
 on demand only (`workflow_dispatch` — no schedule) — trigger it from the
 Actions tab, including from the GitHub mobile app, so you don't need your
 computer on to check who still needs a nudge. Per user, lists which matches
-kicking off in the next 24 hours they still have no `predictions` doc for —
-one line per user, ready to paste into a nudge message.
+kicking off in the next 24 hours they still have no `predictions` doc for,
+plus their champion/top-scorer picks if that deadline also falls in the next
+24 hours — one line per user, ready to paste into a nudge message. Each item
+shows how much time is left before it locks (`HHhMMm`), e.g.:
 
-It deliberately only checks whether a prediction document **exists** — the
-script never calls `.data()` on a `predictions` doc, so there's no code path
-that could print anyone's actual predicted score. You see who's missing a
-pick, never what anyone picked.
+```
+Users with missing predictions in the next 24h:
+* Hollwann Leon: Canada vs Morocco (r16_01, 05h17m), Champion pick (05h17m), Top scorer pick (05h17m)
+
+(HHhMMm) = time left before that item locks.
+```
+
+It deliberately only checks whether a document/field **exists** — the script
+never calls `.data()` on a `predictions` doc, and never reads the actual
+values of `champion_pick`/`top_scorer_pick`, so there's no code path that
+could print anyone's picks. You see who's missing something, never what
+anyone picked.
 
 Uses the same `FIREBASE_SERVICE_ACCOUNT_JSON` secret as the fixture sync — no
 extra setup needed if that's already configured.
