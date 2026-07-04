@@ -12,32 +12,31 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/auth_links/$(request.auth.uid)).data.user_id == userId;
     }
 
-    function matchLocked(matchId) {
+    // Every kind of prediction shares one concept: a deadline, after which
+    // it can no longer be modified — and, for the collections that hide
+    // data pre-deadline, the same moment is also when it becomes readable
+    // by everyone. A match's deadline is its own kickoff_at (or an admin's
+    // manual `locked` override); special_predictions' deadline is the
+    // single admin-set `config/special_predictions.locked_after` (see
+    // admin/seed.js — derived from the earliest Round of 16 kickoff).
+    function matchDeadlinePassed(matchId) {
       let m = get(/databases/$(database)/documents/matches/$(matchId)).data;
       return m.locked == true || request.time > m.kickoff_at;
     }
 
-    // Champion/top-scorer picks can be created or changed up until this
-    // deadline (admin/seed.js sets it to the earliest Round of 16 kickoff
-    // currently in `matches`) — after that, special_predictions is frozen.
-    // Treated as locked by default if the deadline hasn't been configured
-    // yet (config/special_predictions doesn't exist) — fails closed rather
-    // than silently allowing edits with no deadline in place.
-    function specialPredictionsLocked() {
+    // Unlike a match, special_predictions' deadline lives in a config doc
+    // that might not exist yet, so callers must say what "deadline passed"
+    // means in that case. Both call sites below pick the safe direction for
+    // what they gate: writes default to true (stay locked — no silently
+    // allowing edits with no deadline in place), reads default to false
+    // (stay hidden — no revealing picks before an admin has actually set a
+    // deadline). Once a real deadline is configured and passes, both callers
+    // agree on the same underlying fact and get the same answer.
+    function specialPredictionsDeadlinePassed(defaultIfUnset) {
       let configPath = /databases/$(database)/documents/config/special_predictions;
-      return !exists(configPath) || request.time >= get(configPath).data.locked_after;
-    }
-
-    // Opposite default from specialPredictionsLocked(): defaults to NOT
-    // revealed when the deadline hasn't been configured yet, so picks stay
-    // hidden until an admin has actually set (and passed) a real deadline —
-    // the fail-safe direction here is "stay hidden", not "reveal everyone's
-    // picks". Once the same deadline passes, this and specialPredictionsLocked()
-    // agree (both true), which is exactly the "editing closes, reveal opens"
-    // moment the group's rules describe.
-    function specialPredictionsRevealed() {
-      let configPath = /databases/$(database)/documents/config/special_predictions;
-      return exists(configPath) && request.time >= get(configPath).data.locked_after;
+      return exists(configPath)
+        ? request.time >= get(configPath).data.locked_after
+        : defaultIfUnset;
     }
 
     // ---- users (fixed schema, read-only to clients) ----
@@ -84,7 +83,7 @@ service cloud.firestore {
       allow read: if signedIn() && (
         resource == null
           ? isOwner(predictionId.split('_')[0])
-          : (isOwner(resource.data.user_id) || matchLocked(resource.data.match_id))
+          : (isOwner(resource.data.user_id) || matchDeadlinePassed(resource.data.match_id))
       );
 
       allow create: if signedIn()
@@ -95,13 +94,13 @@ service cloud.firestore {
         && request.resource.data.predicted_score_a >= 0
         && request.resource.data.predicted_score_b is int
         && request.resource.data.predicted_score_b >= 0
-        && !matchLocked(request.resource.data.match_id);
+        && !matchDeadlinePassed(request.resource.data.match_id);
 
       allow update: if signedIn()
         && isOwner(resource.data.user_id)
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['predicted_score_a', 'predicted_score_b'])
-        && !matchLocked(resource.data.match_id);
+        && !matchDeadlinePassed(resource.data.match_id);
 
       allow delete: if false;
     }
@@ -112,22 +111,22 @@ service cloud.firestore {
     // points for every user by reading their raw picks directly (see
     // js/scoring-logic.mjs), no server-side precomputation/storage of
     // points involved. Editable (create or update) until
-    // specialPredictionsLocked() — the deadline the group agreed on (up to
-    // the first Round of 16 kickoff), not immediately frozen after the
-    // first save.
+    // specialPredictionsDeadlinePassed() — the deadline the group agreed on
+    // (up to the first Round of 16 kickoff), not immediately frozen after
+    // the first save.
     match /special_predictions/{userId} {
-      allow read: if isOwner(userId) || specialPredictionsRevealed();
+      allow read: if isOwner(userId) || specialPredictionsDeadlinePassed(false);
 
       allow create: if isOwner(userId)
         && request.resource.data.user_id == userId
         && request.resource.data.champion_pick is string
         && request.resource.data.top_scorer_pick is string
-        && !specialPredictionsLocked();
+        && !specialPredictionsDeadlinePassed(true);
 
       allow update: if isOwner(userId)
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['champion_pick', 'top_scorer_pick'])
-        && !specialPredictionsLocked();
+        && !specialPredictionsDeadlinePassed(true);
 
       allow delete: if false;
     }

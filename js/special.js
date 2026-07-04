@@ -1,6 +1,4 @@
 import {
-  collection,
-  getDocs,
   doc,
   getDoc,
   setDoc,
@@ -9,6 +7,7 @@ import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
 import { showStatus } from "./ui.js";
 import { isPastDeadline, findTeamForPlayer } from "./lock-logic.mjs";
+import { fetchSpecialPredictionsDeadline, fetchTeamRosters } from "./queries.js";
 
 const statusEl = document.getElementById("status");
 const formEl = document.getElementById("special-form");
@@ -18,18 +17,6 @@ const scorerPlayerSelect = document.getElementById("scorer-player-select");
 const submitBtn = document.getElementById("submit-btn");
 const submitFeedback = document.getElementById("submit-feedback");
 const lockedView = document.getElementById("locked-view");
-
-async function fetchRosters() {
-  const snap = await getDocs(collection(db, "team_rosters"));
-  return snap.docs.map((d) => d.data()).sort((a, b) => a.team.localeCompare(b.team));
-}
-
-// null deadline (config/special_predictions doesn't exist yet) is treated
-// as already locked, matching firestore.rules' fail-closed default.
-async function fetchDeadline() {
-  const snap = await getDoc(doc(db, "config", "special_predictions"));
-  return snap.exists() ? snap.data().locked_after.toDate() : null;
-}
 
 function populateSelect(selectEl, options, placeholder) {
   selectEl.innerHTML = "";
@@ -102,7 +89,7 @@ async function main() {
   try {
     [existingSnap, deadline] = await Promise.all([
       getDoc(doc(db, "special_predictions", userId)),
-      fetchDeadline(),
+      fetchSpecialPredictionsDeadline(),
     ]);
   } catch (err) {
     showStatus(statusEl, "Couldn't load your prediction.", true);
@@ -119,7 +106,7 @@ async function main() {
 
   let rosters;
   try {
-    rosters = await fetchRosters();
+    rosters = (await fetchTeamRosters()).sort((a, b) => a.team.localeCompare(b.team));
   } catch (err) {
     showStatus(statusEl, "Couldn't load the teams.", true);
     return;
