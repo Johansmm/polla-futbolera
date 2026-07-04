@@ -7,12 +7,13 @@ const assert = require("node:assert/strict");
 let scoreMatch;
 let calculateChampionPoints;
 let calculateTopScorerPoints;
-let findTeamForPlayer;
+let finishedMatches;
+let deriveChampion;
+let deriveSemifinalists;
 
 test.before(async () => {
-  ({ scoreMatch, calculateChampionPoints, calculateTopScorerPoints, findTeamForPlayer } = await import(
-    "../js/scoring-logic.mjs"
-  ));
+  ({ scoreMatch, calculateChampionPoints, calculateTopScorerPoints, finishedMatches, deriveChampion, deriveSemifinalists } =
+    await import("../js/scoring-logic.mjs"));
 });
 
 const MATCH_OUTCOME_POINTS = {
@@ -148,15 +149,56 @@ test("calculateTopScorerPoints never awards the team bonus outside the top 3", (
   assert.equal(points, 0);
 });
 
-test("findTeamForPlayer finds the team owning a given player", () => {
-  const rosters = [
-    { team: "France", players: ["Kylian Mbappé"] },
-    { team: "Argentina", players: ["Lionel Messi"] },
+test("finishedMatches keeps only matches with both real scores set", () => {
+  const matches = [
+    { match_id: "r16_01", real_score_a: 2, real_score_b: 1 },
+    { match_id: "r16_02", real_score_a: null, real_score_b: null },
+    { match_id: "r16_03", real_score_a: 0, real_score_b: null },
   ];
-  assert.equal(findTeamForPlayer(rosters, "Lionel Messi"), "Argentina");
+  assert.deepEqual(
+    finishedMatches(matches).map((m) => m.match_id),
+    ["r16_01"]
+  );
 });
 
-test("findTeamForPlayer returns null when no team has that player", () => {
-  const rosters = [{ team: "France", players: ["Kylian Mbappé"] }];
-  assert.equal(findTeamForPlayer(rosters, "Someone Else"), null);
+test("deriveChampion returns no champion when the final hasn't been played yet", () => {
+  const matches = [{ phase: "final", team_a: "Argentina", team_b: "France", real_score_a: null, real_score_b: null }];
+  assert.deepEqual(deriveChampion(matches), { champion: null, finalists: ["Argentina", "France"] });
+});
+
+test("deriveChampion declares the winner once the final has a decisive score", () => {
+  const matches = [{ phase: "final", team_a: "Argentina", team_b: "France", real_score_a: 3, real_score_b: 0 }];
+  assert.deepEqual(deriveChampion(matches), { champion: "Argentina", finalists: ["Argentina", "France"] });
+});
+
+// A drawn final score (e.g. still awaiting the penalty-shootout result to be
+// recorded as the decisive number) must not be mistaken for team_a winning —
+// same "0 diff isn't a real result" pitfall scoreMatch already guards against.
+test("deriveChampion awards no champion when the final's real score is a draw", () => {
+  const matches = [{ phase: "final", team_a: "Argentina", team_b: "France", real_score_a: 1, real_score_b: 1 }];
+  assert.deepEqual(deriveChampion(matches), { champion: null, finalists: ["Argentina", "France"] });
+});
+
+test("deriveChampion returns no finalists when the final match doesn't exist yet", () => {
+  assert.deepEqual(deriveChampion([{ phase: "sf", team_a: "Argentina", team_b: "Croatia" }]), {
+    champion: null,
+    finalists: [],
+  });
+});
+
+test("deriveSemifinalists collects every team from sf-phase matches, deduplicated", () => {
+  const matches = [
+    { phase: "sf", team_a: "Argentina", team_b: "Croatia" },
+    { phase: "sf", team_a: "France", team_b: "Morocco" },
+    { phase: "final", team_a: "Argentina", team_b: "France" },
+  ];
+  assert.deepEqual(
+    new Set(deriveSemifinalists(matches)),
+    new Set(["Argentina", "Croatia", "France", "Morocco"])
+  );
+});
+
+test("deriveSemifinalists ignores matches whose teams aren't known yet", () => {
+  const matches = [{ phase: "sf", team_a: null, team_b: null }];
+  assert.deepEqual(deriveSemifinalists(matches), []);
 });

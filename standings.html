@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Standings — Poya World Cup 2026</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Standings</h1>
+    <p><a id="predict-link" href="predict.html">← Back to my predictions</a></p>
+    <p id="status" class="status" hidden></p>
+    <p id="standings-note" class="hint" hidden></p>
+    <div id="standings-table" hidden></div>
+  </main>
+  <script>
+    const token = new URLSearchParams(window.location.search).get("token");
+    if (token) {
+      document.getElementById("predict-link").href = `predict.html?token=${encodeURIComponent(token)}`;
+    }
+  </script>
+  <script type="module" src="js/standings.js"></script>
+</body>
+</html>

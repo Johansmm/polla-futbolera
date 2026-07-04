@@ -1,12 +1,11 @@
 // Pure scoring logic — no network/Firestore calls, no stored/precomputed
-// points anywhere. A future standings page reads matches/predictions
-// (public once a match's deadline passes) and special_predictions (public
-// once specialPredictionsDeadlinePassed(false), see firestore.rules) directly,
-// and calls
-// these functions to compute everyone's points on the fly. Kept in its own
-// dependency-free module (note the .mjs extension, same reasoning as
-// lock-logic.mjs) so it can be unit-tested directly with node:test via
-// dynamic import().
+// points anywhere. standings.js reads matches/predictions (public once a
+// match's deadline passes) and special_predictions (public once
+// specialPredictionsDeadlinePassed(false), see firestore.rules) directly,
+// and calls these functions to compute everyone's points on the fly. Kept
+// in its own dependency-free module (note the .mjs extension, same
+// reasoning as lock-logic.mjs) so it can be unit-tested directly with
+// node:test via dynamic import().
 //
 // All functions take the relevant slice of scoring_config.json explicitly
 // as a parameter rather than importing the file directly, so this stays a
@@ -53,7 +52,8 @@ export function calculateChampionPoints(championPick, { champion, finalists }, c
 }
 
 // pickTeam is the team the picked player belongs to (look up via
-// findTeamForPlayer against team_rosters), or null if not found.
+// lock-logic.mjs's findTeamForPlayer against team_rosters), or null if not
+// found.
 export function calculateTopScorerPoints(
   topScorerPick,
   { topScorer, top3Scorers, pickTeam, semifinalists },
@@ -73,6 +73,36 @@ export function calculateTopScorerPoints(
   return points;
 }
 
-export function findTeamForPlayer(rosters, player) {
-  return rosters.find((r) => r.players.includes(player))?.team ?? null;
+// Only matches with an admin-entered result count toward scoring — that's
+// also always past that match's own deadline, so their predictions are
+// guaranteed to be publicly readable by the time this runs.
+export function finishedMatches(matches) {
+  return matches.filter((m) => m.real_score_a != null && m.real_score_b != null);
+}
+
+// Champion/finalists aren't stored anywhere (see CLAUDE.md's schema notes)
+// — derived from the final match's team_a/team_b (reaching the final) and
+// real score (winning it, once decisive).
+export function deriveChampion(matches) {
+  const final = matches.find((m) => m.phase === "final");
+  if (!final) return { champion: null, finalists: [] };
+
+  const finalists = [final.team_a, final.team_b].filter(Boolean);
+  const decisive =
+    final.real_score_a != null && final.real_score_b != null && final.real_score_a !== final.real_score_b;
+  const champion = decisive ? (final.real_score_a > final.real_score_b ? final.team_a : final.team_b) : null;
+
+  return { champion, finalists };
+}
+
+// A team counts as a semifinalist just by appearing in an "sf"-phase match
+// (win or lose) — used for the top-scorer bonus, not for who's still alive.
+export function deriveSemifinalists(matches) {
+  const teams = new Set();
+  for (const match of matches) {
+    if (match.phase !== "sf") continue;
+    if (match.team_a) teams.add(match.team_a);
+    if (match.team_b) teams.add(match.team_b);
+  }
+  return [...teams];
 }
