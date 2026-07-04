@@ -57,7 +57,7 @@ async function fetchMatches() {
 // Predictions have no unconstrained list rule — only a per-match query
 // (readable once that match's deadline passes, i.e. locked, per
 // firestore.rules' matchDeadlinePassed) is allowed, so this is fetched once
-// per locked match rather than for the whole collection. A match is
+// per scorable match rather than for the whole collection. A match is
 // readable as soon as it locks, even before the admin enters a result.
 async function fetchPredictionsByMatch(matchId) {
   const snap = await getDocs(query(collection(db, "predictions"), where("match_id", "==", matchId)));
@@ -86,9 +86,13 @@ async function computeStandings() {
 
   const finished = finishedMatches(matches);
   const finishedIds = new Set(finished.map((m) => m.id));
-  const lockedMatches = matches.filter(isMatchLocked);
+  // Only matches whose phase has a configured multiplier count toward
+  // scoring — an unconfigured phase has no meaningful points to show.
+  const scorableMatches = matches.filter(
+    (match) => isMatchLocked(match) && scoringConfig.phase_multipliers[match.phase] != null
+  );
   const predictionsByMatch = Object.fromEntries(
-    await Promise.all(lockedMatches.map(async (match) => [match.id, await fetchPredictionsByMatch(match.id)]))
+    await Promise.all(scorableMatches.map(async (match) => [match.id, await fetchPredictionsByMatch(match.id)]))
   );
 
   // false when unset: an unconfigured deadline must read as "not revealed"
@@ -104,10 +108,13 @@ async function computeStandings() {
   const rows = users.map((user) => {
     let matchPoints = 0;
     let exactHits = 0;
+    let predictionsSubmitted = 0;
     const matchBreakdown = [];
 
-    for (const match of lockedMatches) {
+    for (const match of scorableMatches) {
       const prediction = predictionsByMatch[match.id]?.[user.user_id];
+      if (prediction) predictionsSubmitted += 1;
+
       const { points, exactScoreHit } = scoreMatchBreakdown(
         prediction,
         match,
@@ -147,6 +154,7 @@ async function computeStandings() {
       championPoints,
       topScorerPoints,
       exactHits,
+      predictionsSubmitted,
       total: matchPoints + championPoints + topScorerPoints,
       matchBreakdown,
       championPick: pick?.champion_pick ?? null,
@@ -154,13 +162,15 @@ async function computeStandings() {
     };
   });
 
+  const averageTotal = rows.length ? rows.reduce((sum, row) => sum + row.total, 0) / rows.length : 0;
+  rows.forEach((row) => {
+    row.vsAverage = row.total - averageTotal;
+  });
+
   rows.sort((a, b) => b.total - a.total || b.exactHits - a.exactHits || a.name.localeCompare(b.name));
 
-  // Most recent kickoff first — only matches whose phase has a configured
-  // multiplier count toward scoring, so an unconfigured phase has no
-  // meaningful section to show here.
-  const matchSections = lockedMatches
-    .filter((match) => scoringConfig.phase_multipliers[match.phase] != null)
+  // Most recent kickoff first.
+  const matchSections = [...scorableMatches]
     .sort((a, b) => kickoffDate(b) - kickoffDate(a))
     .map((match) => ({
       title: `${PHASE_LABELS[match.phase] ?? match.phase}: ${match.team_a ?? "?"} vs ${match.team_b ?? "?"}`,
@@ -197,6 +207,7 @@ async function computeStandings() {
     topScorerKnown: Boolean(topScorer),
     matchSections,
     specialSections,
+    totalScorableMatches: scorableMatches.length,
   };
 }
 
@@ -211,17 +222,31 @@ function pendingNote({ specialRevealed, championDecided, topScorerKnown }) {
   return `Match points only for now — ${missing.join(" and ")}.`;
 }
 
-function renderTable(rows) {
+function formatDelta(value) {
+  const rounded = Math.round(value * 10) / 10;
+  return rounded > 0 ? `+${rounded}` : `${rounded}`; // negative already carries "-"; 0 needs no sign
+}
+
+function deltaClass(value) {
+  const rounded = Math.round(value * 10) / 10;
+  if (rounded > 0) return "delta-positive";
+  if (rounded < 0) return "delta-negative";
+  return "delta-neutral";
+}
+
+function renderTable(rows, totalScorableMatches) {
   const table = document.createElement("table");
   table.innerHTML = `
     <thead>
       <tr>
         <th>#</th>
         <th>Name</th>
-        <th>Matches</th>
-        <th>Champion</th>
-        <th>Top scorer</th>
-        <th>Total</th>
+        <th>Predictions submitted</th>
+        <th>Exact hits</th>
+        <th>vs. Average (pts)</th>
+        <th>Matches (pts)</th>
+        <th>Special (pts)</th>
+        <th>Total (pts)</th>
       </tr>
     </thead>
   `;
@@ -232,9 +257,11 @@ function renderTable(rows) {
     tr.innerHTML = `
       <td>${index + 1}</td>
       <td>${row.name}</td>
+      <td>${row.predictionsSubmitted}/${totalScorableMatches}</td>
+      <td>${row.exactHits}</td>
+      <td class="${deltaClass(row.vsAverage)}">${formatDelta(row.vsAverage)}</td>
       <td>${row.matchPoints}</td>
-      <td>${row.championPoints}</td>
-      <td>${row.topScorerPoints}</td>
+      <td>${row.championPoints + row.topScorerPoints}</td>
       <td><strong>${row.total}</strong></td>
     `;
     tbody.appendChild(tr);
@@ -298,7 +325,7 @@ async function main() {
     noteEl.hidden = false;
   }
 
-  renderTable(result.rows);
+  renderTable(result.rows, result.totalScorableMatches);
   renderSections(result.specialSections, result.matchSections);
 }
 
