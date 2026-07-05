@@ -24,6 +24,13 @@ service cloud.firestore {
       return m.locked == true || request.time > m.kickoff_at;
     }
 
+    // Shared by predictions' create and update: a scoreline is an integer
+    // goal count, capped at 99 to match the client's own input bound and
+    // stay clear of the safe-integer range the app's scoring math assumes.
+    function isValidScore(value) {
+      return value is int && value >= 0 && value <= 99;
+    }
+
     // Unlike a match, special_predictions' deadline lives in a config doc
     // that might not exist yet, so callers must say what "deadline passed"
     // means in that case. Both call sites below pick the safe direction for
@@ -90,16 +97,16 @@ service cloud.firestore {
         && isOwner(request.resource.data.user_id)
         && predictionId == request.resource.data.user_id + '_' + request.resource.data.match_id
         && request.resource.data.match_id is string
-        && request.resource.data.predicted_score_a is int
-        && request.resource.data.predicted_score_a >= 0
-        && request.resource.data.predicted_score_b is int
-        && request.resource.data.predicted_score_b >= 0
+        && isValidScore(request.resource.data.predicted_score_a)
+        && isValidScore(request.resource.data.predicted_score_b)
         && !matchDeadlinePassed(request.resource.data.match_id);
 
       allow update: if signedIn()
         && isOwner(resource.data.user_id)
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['predicted_score_a', 'predicted_score_b'])
+        && isValidScore(request.resource.data.predicted_score_a)
+        && isValidScore(request.resource.data.predicted_score_b)
         && !matchDeadlinePassed(resource.data.match_id);
 
       allow delete: if false;
