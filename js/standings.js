@@ -9,7 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
-import { showStatus, formatKickoff } from "./ui.js";
+import { showStatus, formatKickoff, teamFlagImg } from "./ui.js";
 import { isPastDeadline, isMatchLocked, kickoffDate, findTeamForPlayer } from "./lock-logic.mjs";
 import {
   scoreMatchBreakdown,
@@ -169,7 +169,7 @@ async function computeStandings() {
   const matchSections = [...scorableMatches]
     .sort((a, b) => kickoffDate(b) - kickoffDate(a))
     .map((match) => ({
-      title: `${PHASE_LABELS[match.phase] ?? match.phase}: ${match.team_a ?? "?"} vs ${match.team_b ?? "?"} — ${formatKickoff(match)}`,
+      title: `${PHASE_LABELS[match.phase] ?? match.phase}: ${teamFlagImg(match.team_a_crest_url, match.team_a)} ${match.team_a ?? "?"} vs ${teamFlagImg(match.team_b_crest_url, match.team_b)} ${match.team_b ?? "?"} — ${formatKickoff(match)}`,
       entries: rows.map((row) => {
         const breakdown = row.matchBreakdown.find((b) => b.match.id === match.id);
         const prediction = breakdown?.prediction
@@ -274,7 +274,7 @@ function renderSection({ title, entries }) {
   section.className = "breakdown-section";
 
   const summary = document.createElement("summary");
-  summary.textContent = title;
+  summary.innerHTML = title;
   section.appendChild(summary);
 
   const table = document.createElement("table");

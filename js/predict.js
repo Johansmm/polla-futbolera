@@ -9,7 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
-import { showStatus, formatKickoff } from "./ui.js";
+import { showStatus, formatKickoff, teamFlagImg } from "./ui.js";
 import { isMatchLocked } from "./lock-logic.mjs";
 
 const PHASE_LABELS = {
@@ -57,7 +57,9 @@ function renderMatchRow(match, prediction, userId) {
 
   row.innerHTML = `
     <div class="match-teams">
-      ${match.team_a ?? "?"} vs ${match.team_b ?? "?"}
+      ${teamFlagImg(match.team_a_crest_url, match.team_a)} ${match.team_a ?? "?"}
+      vs
+      ${teamFlagImg(match.team_b_crest_url, match.team_b)} ${match.team_b ?? "?"}
       <span class="match-kickoff">${formatKickoff(match)}</span>
     </div>
     <div class="match-inputs">

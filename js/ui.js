@@ -6,6 +6,15 @@ export function showStatus(el, message, isError = false) {
   el.hidden = false;
 }
 
+// crestUrl comes straight from matches.team_a_crest_url/team_b_crest_url,
+// synced by automation/sync-fixtures.js from football-data.org — there's no
+// team-name-to-flag lookup of our own to keep in sync. Renders nothing (not
+// a broken-image icon) for a team with no crest synced yet.
+export function teamFlagImg(crestUrl, teamName) {
+  if (!crestUrl) return "";
+  return `<img class="team-flag" src="${crestUrl}" alt="${teamName ?? ""}" />`;
+}
+
 // Renders in the viewer's own browser timezone rather than a fixed one —
 // the group is spread across different European countries (see CLAUDE.md),
 // so there's no single "right" timezone to pick on their behalf. Appending
