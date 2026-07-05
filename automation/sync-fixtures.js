@@ -90,8 +90,8 @@ function buildFixturePatch(apiMatch) {
 }
 
 // candidates: [{ id, kickoffAt: Date, ... }] — matches Firestore doc shape
-// loosely enough that findExistingMatch() below can pass mapped docs in
-// directly, while tests can pass plain objects with no Firestore involved.
+// loosely enough that the I/O code below can pass mapped docs in directly,
+// while tests can pass plain objects with no Firestore involved.
 function findMatchingDoc(candidates, targetDate, toleranceMs = MATCH_TOLERANCE_MS) {
   const target = targetDate.getTime();
   return candidates.find((c) => Math.abs(c.kickoffAt.getTime() - target) < toleranceMs);
@@ -158,11 +158,24 @@ if (require.main === module) {
 
   const db = admin.firestore();
 
-  const fetchMatchStatuses = async () => {
+  // Single read of the whole matches collection per run, reused for both
+  // the --only-if-pending gate and the existing-match lookups in
+  // syncFixture below. This used to be one Firestore query PER API fixture
+  // (findExistingMatch, plus a second one when creating a new doc) — each
+  // scanning every existing match sharing that phase, which for a phase
+  // like group stage (~70+ matches) meant tens of thousands of document
+  // reads in a single run. That was tolerable at 8 runs/day, but
+  // fast-sync repeating it several times an hour blew through Firestore's
+  // free-tier daily read quota. Reading the whole (much smaller) matches
+  // collection once and matching in memory instead avoids that entirely.
+  const fetchMatchDocs = async () => {
     const snap = await db.collection("matches").get();
-    return snap.docs
-      .filter((doc) => doc.data().kickoff_at)
-      .map((doc) => ({ kickoffAt: doc.data().kickoff_at.toDate(), real_score_a: doc.data().real_score_a }));
+    return snap.docs.map((doc) => ({
+      id: doc.id,
+      phase: doc.data().phase,
+      kickoffAt: doc.data().kickoff_at ? doc.data().kickoff_at.toDate() : null,
+      real_score_a: doc.data().real_score_a,
+    }));
   };
 
   const fetchAllFixtures = async () => {
@@ -190,15 +203,11 @@ if (require.main === module) {
     return data.matches;
   };
 
-  const findExistingMatch = async (phase, kickoffDate) => {
-    const snap = await db.collection("matches").where("phase", "==", phase).get();
-    const candidates = snap.docs
-      .filter((doc) => doc.data().kickoff_at)
-      .map((doc) => ({ id: doc.id, ref: doc.ref, kickoffAt: doc.data().kickoff_at.toDate() }));
-    return findMatchingDoc(candidates, kickoffDate);
-  };
-
-  const syncFixture = async (apiMatch) => {
+  // matchDocs is the in-memory snapshot fetched once in main() — mutated in
+  // place as matches are created below so a second same-phase fixture later
+  // in the same run's loop sees it as taken, matching the old behavior
+  // where a fresh Firestore query would have shown the same thing.
+  const syncFixture = async (apiMatch, matchDocs) => {
     const { phase, kickoffDate, team_a, team_b } = buildFixturePatch(apiMatch);
 
     const fixtureFields = { phase, kickoff_at: admin.firestore.Timestamp.fromDate(kickoffDate) };
@@ -211,15 +220,16 @@ if (require.main === module) {
     // deliberately never touches these fields once set).
     const resultFields = buildResultFields(apiMatch);
 
-    const existing = await findExistingMatch(phase, kickoffDate);
+    const phaseCandidates = matchDocs.filter((d) => d.phase === phase && d.kickoffAt);
+    const existing = findMatchingDoc(phaseCandidates, kickoffDate);
 
     if (existing) {
-      await existing.ref.set({ ...fixtureFields, ...resultFields }, { merge: true });
+      await db.collection("matches").doc(existing.id).set({ ...fixtureFields, ...resultFields }, { merge: true });
       return { matchId: existing.id, action: "updated" };
     }
 
-    const phaseSnap = await db.collection("matches").where("phase", "==", phase).get();
-    const matchId = generateMatchId(phase, new Set(phaseSnap.docs.map((d) => d.id)));
+    const takenIds = new Set(matchDocs.filter((d) => d.phase === phase).map((d) => d.id));
+    const matchId = generateMatchId(phase, takenIds);
 
     await db.collection("matches").doc(matchId).set({
       match_id: matchId,
@@ -232,16 +242,17 @@ if (require.main === module) {
       ...resultFields,
     });
 
+    matchDocs.push({ id: matchId, phase, kickoffAt: kickoffDate, real_score_a: resultFields.real_score_a ?? null });
+
     return { matchId, action: "created" };
   };
 
   const main = async () => {
-    if (onlyIfPending) {
-      const matchStatuses = await fetchMatchStatuses();
-      if (!hasPendingResult(matchStatuses)) {
-        console.log("No match awaiting a result — skipping the football-data.org call.");
-        return;
-      }
+    const matchDocs = await fetchMatchDocs();
+
+    if (onlyIfPending && !hasPendingResult(matchDocs)) {
+      console.log("No match awaiting a result — skipping the football-data.org call.");
+      return;
     }
 
     const fixtures = await fetchAllFixtures();
@@ -256,7 +267,7 @@ if (require.main === module) {
         console.log(`Skipping API match ${apiMatch.id}: no kickoff time yet.`);
         continue;
       }
-      const result = await syncFixture(apiMatch);
+      const result = await syncFixture(apiMatch, matchDocs);
       console.log(JSON.stringify({ apiMatchId: apiMatch.id, ...result }));
     }
   };
