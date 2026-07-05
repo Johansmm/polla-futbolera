@@ -5,12 +5,13 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
-import { showStatus } from "./ui.js";
+import { showStatus, showRetry, showSignedInName, formatDateTime } from "./ui.js";
 import { isPastDeadline, findTeamForPlayer } from "./lock-logic.mjs";
-import { fetchSpecialPredictionsDeadline, fetchTeamRosters } from "./queries.js";
+import { fetchSpecialPredictionsDeadline, fetchTeamRosters, fetchUserName } from "./queries.js";
 
 const statusEl = document.getElementById("status");
 const formEl = document.getElementById("special-form");
+const deadlineHintEl = document.getElementById("deadline-hint");
 const championSelect = document.getElementById("champion-select");
 const scorerTeamSelect = document.getElementById("scorer-team-select");
 const scorerPlayerSelect = document.getElementById("scorer-player-select");
@@ -42,16 +43,24 @@ function renderForm(rosters, existingPick) {
 
   function populateScorerPlayers(team) {
     const players = [...(rostersByTeam[team] ?? [])].sort();
-    populateSelect(scorerPlayerSelect, players, "Choose a player...");
+    populateSelect(scorerPlayerSelect, players, "Choose a player…");
     scorerPlayerSelect.disabled = players.length === 0;
   }
 
-  populateSelect(championSelect, teamNames, "Choose a team...");
-  populateSelect(scorerTeamSelect, teamNames, "Choose a country...");
-  populateSelect(scorerPlayerSelect, [], "Choose a country first...");
+  populateSelect(championSelect, teamNames, "Choose a team…");
+  populateSelect(scorerTeamSelect, teamNames, "Choose a country…");
+  populateSelect(scorerPlayerSelect, [], "Choose a country first…");
   scorerPlayerSelect.disabled = true;
 
   scorerTeamSelect.addEventListener("change", () => populateScorerPlayers(scorerTeamSelect.value));
+
+  // Any change after a save means the picks on screen are no longer the
+  // picks that are stored — clear the stale "Saved" confirmation.
+  for (const select of [championSelect, scorerTeamSelect, scorerPlayerSelect]) {
+    select.addEventListener("change", () => {
+      submitFeedback.hidden = true;
+    });
+  }
 
   if (existingPick) {
     championSelect.value = existingPick.champion_pick;
@@ -63,26 +72,39 @@ function renderForm(rosters, existingPick) {
       scorerPlayerSelect.value = existingPick.top_scorer_pick;
     }
 
-    submitBtn.textContent = "Update prediction";
+    submitBtn.textContent = "Update picks";
   }
 
   formEl.hidden = false;
 }
 
-function renderLocked(pick) {
-  lockedView.innerHTML = pick
-    ? `
-      <p>The deadline to pick has closed.</p>
+function renderLocked(pick, deadlineNotConfigured) {
+  if (pick) {
+    lockedView.innerHTML = `
+      <p>Your picks are locked in:</p>
       <p><strong>Champion:</strong> ${pick.champion_pick}</p>
       <p><strong>Top scorer:</strong> ${pick.top_scorer_pick}</p>
-    `
-    : `<p>The deadline to pick a champion and top scorer has closed and you didn't make a pick in time.</p>`;
+    `;
+  } else if (deadlineNotConfigured) {
+    // No deadline configured means picks haven't opened yet (editing
+    // fails closed) — very different from the user missing a deadline.
+    lockedView.innerHTML =
+      "<p>Picks aren't open yet — the organizer hasn't set the schedule. Check back soon.</p>";
+  } else {
+    lockedView.innerHTML =
+      "<p>Picks are locked — the deadline passed before you chose. You can still see everyone's picks on the standings page.</p>";
+  }
   lockedView.hidden = false;
 }
 
 async function main() {
   const userId = await resolveUserFromToken(statusEl);
   if (!userId) return;
+
+  showStatus(statusEl, "Loading your picks…");
+  fetchUserName(userId)
+    .then(showSignedInName)
+    .catch(() => {});
 
   let existingSnap;
   let deadline;
@@ -92,7 +114,7 @@ async function main() {
       fetchSpecialPredictionsDeadline(),
     ]);
   } catch (err) {
-    showStatus(statusEl, "Couldn't load your prediction.", true);
+    showRetry(statusEl, "Couldn't load your picks.", () => window.location.reload());
     return;
   }
 
@@ -100,7 +122,7 @@ async function main() {
 
   if (isPastDeadline(deadline)) {
     statusEl.hidden = true;
-    renderLocked(existingPick);
+    renderLocked(existingPick, deadline === null);
     return;
   }
 
@@ -108,7 +130,7 @@ async function main() {
   try {
     rosters = (await fetchTeamRosters()).sort((a, b) => a.team.localeCompare(b.team));
   } catch (err) {
-    showStatus(statusEl, "Couldn't load the teams.", true);
+    showRetry(statusEl, "Couldn't load the teams.", () => window.location.reload());
     return;
   }
 
@@ -121,6 +143,12 @@ async function main() {
   }
 
   statusEl.hidden = true;
+
+  // The deadline is config-driven, so show the real date instead of prose
+  // that could go stale — and spell it out in the viewer's own timezone.
+  deadlineHintEl.textContent = `You can change your picks as often as you want until ${formatDateTime(deadline)}.`;
+  deadlineHintEl.hidden = false;
+
   renderForm(rosters, existingPick);
 
   formEl.addEventListener("submit", async (event) => {
@@ -130,30 +158,42 @@ async function main() {
     const topScorerPick = scorerPlayerSelect.value;
 
     submitFeedback.classList.remove("error");
+    submitFeedback.hidden = true;
 
     if (!championPick || !topScorerPick) {
       showStatus(submitFeedback, "Pick a champion and a top scorer before saving.", true);
       return;
     }
 
-    const confirmMessage = existingPick
-      ? `Confirm the change?\n\nChampion: ${championPick}\nTop scorer: ${topScorerPick}`
-      : `Confirm your prediction?\n\nChampion: ${championPick}\nTop scorer: ${topScorerPick}`;
-    if (!window.confirm(confirmMessage)) return;
-
+    let lockedDuringSave = false;
     submitBtn.disabled = true;
+    submitBtn.textContent = "Saving…";
     try {
       await setDoc(doc(db, "special_predictions", userId), {
         user_id: userId,
         champion_pick: championPick,
         top_scorer_pick: topScorerPick,
       });
-      showStatus(submitFeedback, "Saved. You can change it again until the first Round of 16 match kicks off.");
-      submitBtn.textContent = "Update prediction";
+      showStatus(
+        submitFeedback,
+        `Saved — champion: ${championPick}, top scorer: ${topScorerPick}. You can change your picks until ${formatDateTime(deadline)}.`
+      );
     } catch (err) {
-      showStatus(submitFeedback, "Couldn't save. Please try again.", true);
+      // The deadline can pass while the tab sits open — the server rejects
+      // the write, and a retry can never succeed, so don't present it as a
+      // connection problem.
+      if (err?.code === "permission-denied") {
+        lockedDuringSave = true;
+        for (const select of [championSelect, scorerTeamSelect, scorerPlayerSelect]) {
+          select.disabled = true;
+        }
+        showStatus(submitFeedback, "The deadline has passed — picks are locked now.", true);
+      } else {
+        showStatus(submitFeedback, "Couldn't save — check your connection and try again.", true);
+      }
     } finally {
-      submitBtn.disabled = false;
+      submitBtn.disabled = lockedDuringSave;
+      submitBtn.textContent = "Update picks";
     }
   });
 }

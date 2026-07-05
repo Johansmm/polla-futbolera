@@ -3,19 +3,34 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Poya World Cup 2026</title>
-  <link rel="stylesheet" href="css/style.css" />
-</head>
-<body>
-  <main class="container">
-    <h1>Poya — World Cup 2026</h1>
-    <p>Use the personal link the organizer sent you to enter your predictions.</p>
-  </main>
+  <title>Poya — World Cup 2026</title>
+  <meta name="description" content="Score-prediction pool for the World Cup 2026 knockout stage." />
+  <meta name="theme-color" content="#eef4ef" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0b120e" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E" />
   <script>
+    // Runs before first paint so token holders never see this landing page
+    // flash by on their way to the prediction form.
     const token = new URLSearchParams(window.location.search).get("token");
     if (token) {
       window.location.replace(`predict.html?token=${encodeURIComponent(token)}`);
     }
   </script>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <main class="container landing">
+    <p class="eyebrow">⚽ Poya · World Cup 2026</p>
+    <h1>The prediction pool</h1>
+    <p>
+      Predict the score of every knockout match, pick your champion and top
+      scorer, and climb the standings.
+    </p>
+    <p class="hint">
+      Everything runs through the personal link the organizer sent you — if
+      yours doesn't work, ask for a fresh one. The link is personal: don't
+      forward it.
+    </p>
+  </main>
 </body>
 </html>

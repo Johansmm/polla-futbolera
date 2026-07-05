@@ -9,7 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
-import { showStatus, formatKickoff, teamFlagImg } from "./ui.js";
+import { showStatus, showRetry, showSignedInName, formatKickoff, teamFlagImg } from "./ui.js";
 import { isPastDeadline, isMatchLocked, kickoffDate, findTeamForPlayer } from "./lock-logic.mjs";
 import {
   scoreMatchBreakdown,
@@ -19,7 +19,7 @@ import {
   deriveChampion,
   deriveSemifinalists,
 } from "./scoring-logic.mjs";
-import { fetchSpecialPredictionsDeadline, fetchTeamRosters } from "./queries.js";
+import { fetchSpecialPredictionsDeadline, fetchTeamRosters, fetchUserName } from "./queries.js";
 
 const PHASE_LABELS = {
   r16: "Round of 16",
@@ -29,10 +29,21 @@ const PHASE_LABELS = {
   final: "Final",
 };
 
+// Compact phase tags for the per-match breakdown summaries, which have to
+// fit a phone screen alongside two team names and flags.
+const PHASE_TAGS = {
+  r16: "R16",
+  qf: "QF",
+  sf: "SF",
+  third_place: "3rd place",
+  final: "Final",
+};
+
 const statusEl = document.getElementById("status");
 const noteEl = document.getElementById("standings-note");
 const tableEl = document.getElementById("standings-table");
 const sectionsEl = document.getElementById("breakdown-sections");
+const columnsHelpEl = document.getElementById("columns-help");
 
 async function fetchScoringConfig() {
   const res = await fetch("scoring_config.json");
@@ -145,6 +156,7 @@ async function computeStandings() {
         : 0;
 
     return {
+      userId: user.user_id,
       name: user.name,
       matchPoints,
       championPoints,
@@ -165,28 +177,45 @@ async function computeStandings() {
 
   rows.sort((a, b) => b.total - a.total || b.exactHits - a.exactHits || a.name.localeCompare(b.name));
 
+  // Competition ranking ("1, 1, 3"): rows tied on both the total and the
+  // exact-hits tiebreaker share a rank instead of asserting an ordering
+  // that doesn't exist — the alphabetical sort above is display-only.
+  rows.forEach((row, index) => {
+    const prev = rows[index - 1];
+    row.rank = prev && prev.total === row.total && prev.exactHits === row.exactHits ? prev.rank : index + 1;
+  });
+
   // Most recent kickoff first.
   const matchSections = [...scorableMatches]
     .sort((a, b) => kickoffDate(b) - kickoffDate(a))
-    .map((match) => ({
-      title: `${PHASE_LABELS[match.phase] ?? match.phase}: ${teamFlagImg(match.team_a_crest_url, match.team_a)} ${match.team_a ?? "?"} vs ${teamFlagImg(match.team_b_crest_url, match.team_b)} ${match.team_b ?? "?"} — ${formatKickoff(match)}`,
-      entries: rows.map((row) => {
-        const breakdown = row.matchBreakdown.find((b) => b.match.id === match.id);
-        const prediction = breakdown?.prediction
-          ? `${breakdown.prediction.predicted_score_a}-${breakdown.prediction.predicted_score_b}`
-          : "—";
-        return { name: row.name, prediction, points: breakdown?.points ?? null };
-      }),
-    }));
+    .map((match) => {
+      const finishedTag =
+        match.real_score_a != null && match.real_score_b != null
+          ? ` · Final ${match.real_score_a}–${match.real_score_b}`
+          : "";
+      return {
+        title: `
+          <span class="summary-title">${PHASE_TAGS[match.phase] ?? match.phase} · ${teamFlagImg(match.team_a_crest_url)} ${match.team_a ?? "?"} vs ${teamFlagImg(match.team_b_crest_url)} ${match.team_b ?? "?"}</span>
+          <span class="summary-sub">${formatKickoff(match)}${finishedTag}</span>
+        `,
+        entries: rows.map((row) => {
+          const breakdown = row.matchBreakdown.find((b) => b.match.id === match.id);
+          const prediction = breakdown?.prediction
+            ? `${breakdown.prediction.predicted_score_a}–${breakdown.prediction.predicted_score_b}`
+            : "—";
+          return { name: row.name, prediction, points: breakdown?.points ?? null };
+        }),
+      };
+    });
 
   const specialSections = specialRevealed
     ? [
         {
-          title: "Champion pick",
+          title: '<span class="summary-title">Champion picks</span>',
           entries: rows.map((row) => ({ name: row.name, prediction: row.championPick ?? "—", points: row.championPoints })),
         },
         {
-          title: "Top scorer pick",
+          title: '<span class="summary-title">Top scorer picks</span>',
           entries: rows.map((row) => ({
             name: row.name,
             prediction: row.topScorerPick ?? "—",
@@ -230,36 +259,61 @@ function deltaClass(value) {
   return "delta-neutral";
 }
 
-function renderTable(rows, totalScorableMatches) {
+// Cells are built with textContent (not innerHTML) so nothing stored in
+// Firestore — user names above all — can inject markup into the table.
+function td(className, ...children) {
+  const cell = document.createElement("td");
+  if (className) cell.className = className;
+  cell.append(...children);
+  return cell;
+}
+
+function renderTable(rows, totalScorableMatches, viewerId) {
   const table = document.createElement("table");
   table.innerHTML = `
     <thead>
       <tr>
-        <th>#</th>
+        <th class="num" aria-label="Rank">#</th>
         <th>Name</th>
-        <th>Predictions submitted</th>
-        <th>Exact hits</th>
-        <th>vs. Average (pts)</th>
-        <th>Matches (pts)</th>
-        <th>Special (pts)</th>
-        <th>Total (pts)</th>
+        <th class="num" aria-label="Predictions submitted">Preds</th>
+        <th class="num" aria-label="Exact scores hit">Exact</th>
+        <th class="num" aria-label="Match points">Match pts</th>
+        <th class="num" aria-label="Special picks points">Special</th>
+        <th class="num">Total</th>
+        <th class="num" aria-label="Points versus the group average">± Avg</th>
       </tr>
     </thead>
   `;
 
   const tbody = document.createElement("tbody");
-  rows.forEach((row, index) => {
+  rows.forEach((row) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${index + 1}</td>
-      <td>${row.name}</td>
-      <td>${row.predictionsSubmitted}/${totalScorableMatches}</td>
-      <td>${row.exactHits}</td>
-      <td class="${deltaClass(row.vsAverage)}">${formatDelta(row.vsAverage)}</td>
-      <td>${row.matchPoints}</td>
-      <td>${row.championPoints + row.topScorerPoints}</td>
-      <td><strong>${row.total}</strong></td>
-    `;
+    if (row.userId === viewerId) tr.classList.add("me-row");
+    // Keyed to the computed rank, not the row position — ties share rank 1,
+    // and every co-leader deserves the crown.
+    if (row.rank === 1) tr.classList.add("leader-row");
+
+    const nameCell = td("name-cell", row.name);
+    if (row.userId === viewerId) {
+      const you = document.createElement("span");
+      you.className = "you-tag";
+      you.textContent = " (you)";
+      nameCell.appendChild(you);
+    }
+
+    const total = document.createElement("strong");
+    total.textContent = String(row.total);
+
+    tr.append(
+      td("num", String(row.rank)),
+      nameCell,
+      td("num", `${row.predictionsSubmitted}/${totalScorableMatches}`),
+      td("num", String(row.exactHits)),
+      td("num", String(row.matchPoints)),
+      td("num", String(row.championPoints + row.topScorerPoints)),
+      td("num total-cell", total),
+      td(`num ${deltaClass(row.vsAverage)}`, formatDelta(row.vsAverage))
+    );
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -267,6 +321,7 @@ function renderTable(rows, totalScorableMatches) {
   tableEl.innerHTML = "";
   tableEl.appendChild(table);
   tableEl.hidden = false;
+  columnsHelpEl.hidden = false;
 }
 
 function renderSection({ title, entries }) {
@@ -278,24 +333,52 @@ function renderSection({ title, entries }) {
   section.appendChild(summary);
 
   const table = document.createElement("table");
-  table.innerHTML = "<thead><tr><th>Name</th><th>Prediction</th><th>Points</th></tr></thead>";
+  table.innerHTML = '<thead><tr><th>Name</th><th>Prediction</th><th class="num">Points</th></tr></thead>';
 
   const tbody = document.createElement("tbody");
   entries.forEach(({ name, prediction, points }) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${name}</td><td>${prediction}</td><td>${points === null ? "pending" : points}</td>`;
+    const pointsCell = td("num");
+    if (points === null) {
+      const pending = document.createElement("em");
+      pending.className = "pending";
+      pending.textContent = "pending";
+      pointsCell.appendChild(pending);
+    } else {
+      pointsCell.textContent = String(points);
+    }
+    tr.append(td("", name), td("", prediction), pointsCell);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-  section.appendChild(table);
+
+  // Scroll wrapper so an overlong name scrolls the table inside the card
+  // instead of being clipped by the card's overflow:hidden corners.
+  const scroll = document.createElement("div");
+  scroll.className = "table-scroll";
+  scroll.appendChild(table);
+  section.appendChild(scroll);
 
   return section;
 }
 
 function renderSections(specialSections, matchSections) {
+  // Latest matches first — after every game this is what everyone opens
+  // the page to check — with the one-time special picks after them.
   sectionsEl.innerHTML = "";
-  for (const section of [...specialSections, ...matchSections]) {
-    sectionsEl.appendChild(renderSection(section));
+  const groups = [
+    { heading: "Match by match", sections: matchSections },
+    { heading: "Special picks", sections: specialSections },
+  ];
+  for (const { heading, sections } of groups) {
+    if (!sections.length) continue;
+    const h = document.createElement("h2");
+    h.className = "sections-heading";
+    h.textContent = heading;
+    sectionsEl.appendChild(h);
+    for (const section of sections) {
+      sectionsEl.appendChild(renderSection(section));
+    }
   }
   sectionsEl.hidden = false;
 }
@@ -304,12 +387,27 @@ async function main() {
   const userId = await resolveUserFromToken(statusEl);
   if (!userId) return;
 
+  showStatus(statusEl, "Loading standings…");
+  fetchUserName(userId)
+    .then(showSignedInName)
+    .catch(() => {});
+
   let result;
   try {
     result = await computeStandings();
   } catch (err) {
     console.error(err);
-    showStatus(statusEl, "Couldn't load the standings.", true);
+    showRetry(statusEl, "Couldn't load the standings.", () => window.location.reload());
+    return;
+  }
+
+  if (!result.rows.length) {
+    showStatus(statusEl, "No players registered yet — ask the organizer.");
+    return;
+  }
+
+  if (result.totalScorableMatches === 0 && !result.specialRevealed) {
+    showStatus(statusEl, "Standings will appear once the first match kicks off — nothing is scored yet.");
     return;
   }
 
@@ -321,7 +419,7 @@ async function main() {
     noteEl.hidden = false;
   }
 
-  renderTable(result.rows, result.totalScorableMatches);
+  renderTable(result.rows, result.totalScorableMatches, userId);
   renderSections(result.specialSections, result.matchSections);
 }
 

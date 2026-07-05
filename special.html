@@ -3,42 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Champion & Top Scorer — Poya World Cup 2026</title>
+  <title>Champion &amp; top scorer — Poya World Cup 2026</title>
+  <meta name="theme-color" content="#eef4ef" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0b120e" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <main class="container">
-    <h1>Tournament Champion & Top Scorer</h1>
-    <p><a id="predict-link" href="predict.html">← Back to my predictions</a></p>
-    <p><a id="standings-link" href="standings.html">See the standings →</a></p>
-    <p class="hint">You can change your pick as many times as you want until the first Round of 16 match kicks off.</p>
-    <p id="status" class="status" hidden></p>
+    <header class="page-header">
+      <p class="eyebrow">⚽ Poya · World Cup 2026</p>
+      <h1>Champion &amp; top scorer</h1>
+      <p id="user-name" class="signed-in" hidden></p>
+      <nav id="site-nav" class="page-nav" aria-label="Pages"></nav>
+    </header>
+    <p id="deadline-hint" class="hint" hidden></p>
+    <p id="status" class="status" role="status" hidden></p>
 
     <form id="special-form" hidden>
       <section class="phase-section">
         <h2>Champion</h2>
-        <select id="champion-select"></select>
+        <label for="champion-select">Team</label>
+        <select id="champion-select" name="champion"></select>
       </section>
 
       <section class="phase-section">
-        <h2>Tournament Top Scorer</h2>
-        <select id="scorer-team-select"></select>
-        <select id="scorer-player-select" disabled></select>
+        <h2>Top scorer</h2>
+        <label for="scorer-team-select">Country</label>
+        <select id="scorer-team-select" name="scorer-team"></select>
+        <label for="scorer-player-select">Player</label>
+        <select id="scorer-player-select" name="scorer-player" disabled></select>
       </section>
 
-      <button type="submit" id="submit-btn">Save prediction</button>
-      <div id="submit-feedback" class="save-feedback" hidden></div>
+      <button type="submit" id="submit-btn">Save picks</button>
+      <div id="submit-feedback" class="save-feedback" role="status" hidden></div>
     </form>
 
     <div id="locked-view" hidden></div>
   </main>
-  <script>
-    const token = new URLSearchParams(window.location.search).get("token");
-    if (token) {
-      document.getElementById("predict-link").href = `predict.html?token=${encodeURIComponent(token)}`;
-      document.getElementById("standings-link").href = `standings.html?token=${encodeURIComponent(token)}`;
-    }
-  </script>
+  <script type="module" src="js/nav.js"></script>
   <script type="module" src="js/special.js"></script>
 </body>
 </html>
