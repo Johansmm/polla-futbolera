@@ -260,6 +260,42 @@ test("prediction create rejects invalid scores", async () => {
       predicted_score_b: 0,
     })
   );
+
+  await assertFails(
+    johan.collection("predictions").doc("johan_r16_01").set({
+      prediction_id: "johan_r16_01",
+      user_id: "johan",
+      match_id: "r16_01",
+      predicted_score_a: 100,
+      predicted_score_b: 0,
+    })
+  );
+});
+
+test("prediction update rejects invalid scores", async () => {
+  await seed(async (db) => {
+    await db.collection("matches").doc("r16_01").set(futureMatch());
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await db.collection("predictions").doc("johan_r16_01").set({
+      prediction_id: "johan_r16_01",
+      user_id: "johan",
+      match_id: "r16_01",
+      predicted_score_a: 1,
+      predicted_score_b: 0,
+    });
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  await assertFails(
+    johan.collection("predictions").doc("johan_r16_01").update({ predicted_score_a: -1 })
+  );
+  await assertFails(
+    johan.collection("predictions").doc("johan_r16_01").update({ predicted_score_a: 100 })
+  );
+  await assertFails(
+    johan.collection("predictions").doc("johan_r16_01").update({ predicted_score_a: 1.5 })
+  );
 });
 
 test("prediction update cannot smuggle in changes to user_id, match_id, or points_earned", async () => {
