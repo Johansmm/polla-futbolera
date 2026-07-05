@@ -86,6 +86,11 @@ function buildFixturePatch(apiMatch) {
   };
   if (apiMatch.homeTeam?.name) patch.team_a = apiMatch.homeTeam.name;
   if (apiMatch.awayTeam?.name) patch.team_b = apiMatch.awayTeam.name;
+  // football-data.org's Team object includes a crest/flag image URL — synced
+  // alongside the name so the client can render a flag next to each team
+  // without hardcoding a team-name-to-country lookup of its own.
+  if (apiMatch.homeTeam?.crest) patch.team_a_crest_url = apiMatch.homeTeam.crest;
+  if (apiMatch.awayTeam?.crest) patch.team_b_crest_url = apiMatch.awayTeam.crest;
   return patch;
 }
 
@@ -208,11 +213,13 @@ if (require.main === module) {
   // in the same run's loop sees it as taken, matching the old behavior
   // where a fresh Firestore query would have shown the same thing.
   const syncFixture = async (apiMatch, matchDocs) => {
-    const { phase, kickoffDate, team_a, team_b } = buildFixturePatch(apiMatch);
+    const { phase, kickoffDate, team_a, team_b, team_a_crest_url, team_b_crest_url } = buildFixturePatch(apiMatch);
 
     const fixtureFields = { phase, kickoff_at: admin.firestore.Timestamp.fromDate(kickoffDate) };
     if (team_a) fixtureFields.team_a = team_a;
     if (team_b) fixtureFields.team_b = team_b;
+    if (team_a_crest_url) fixtureFields.team_a_crest_url = team_a_crest_url;
+    if (team_b_crest_url) fixtureFields.team_b_crest_url = team_b_crest_url;
 
     // Once the API marks a match finished, treat its score as authoritative
     // and overwrite real_score_a/b — this replaces manual result entry,
@@ -235,6 +242,8 @@ if (require.main === module) {
       match_id: matchId,
       team_a: null,
       team_b: null,
+      team_a_crest_url: null,
+      team_b_crest_url: null,
       real_score_a: null,
       real_score_b: null,
       locked: false,

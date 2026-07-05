@@ -4,10 +4,16 @@
 // js/*.js file imports the Firebase SDK from a CDN URL, which Node's module
 // resolution can't follow, so none of those can be loaded from a test.
 
+// kickoff_at arrives as a Firestore Timestamp in the browser but a plain
+// Date/ISO string in tests and in automation scripts that read it back —
+// normalize both to a Date here so callers don't each re-derive this check.
+export function kickoffDate(match) {
+  return match.kickoff_at?.toDate ? match.kickoff_at.toDate() : new Date(match.kickoff_at);
+}
+
 export function isMatchLocked(match) {
   if (match.locked) return true;
-  const kickoff = match.kickoff_at?.toDate ? match.kickoff_at.toDate() : new Date(match.kickoff_at);
-  return Date.now() >= kickoff.getTime();
+  return Date.now() >= kickoffDate(match).getTime();
 }
 
 // Mirrors firestore.rules' specialPredictionsDeadlinePassed(defaultIfUnset):

@@ -9,7 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
-import { showStatus } from "./ui.js";
+import { showStatus, formatKickoff, teamFlagImg } from "./ui.js";
 import { isMatchLocked } from "./lock-logic.mjs";
 
 const PHASE_LABELS = {
@@ -56,7 +56,12 @@ function renderMatchRow(match, prediction, userId) {
   const locked = isMatchLocked(match);
 
   row.innerHTML = `
-    <div class="match-teams">${match.team_a ?? "?"} vs ${match.team_b ?? "?"}</div>
+    <div class="match-teams">
+      ${teamFlagImg(match.team_a_crest_url, match.team_a)} ${match.team_a ?? "?"}
+      vs
+      ${teamFlagImg(match.team_b_crest_url, match.team_b)} ${match.team_b ?? "?"}
+      <span class="match-kickoff">${formatKickoff(match)}</span>
+    </div>
     <div class="match-inputs">
       <input type="number" min="0" class="score-a" value="${prediction?.predicted_score_a ?? ""}" ${locked ? "disabled" : ""} />
       <span>-</span>

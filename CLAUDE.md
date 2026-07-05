@@ -71,6 +71,7 @@ Explicitly deprioritized for now (build later, don't block on this):
 | `match_id` | string | e.g. `r16_01` |
 | `phase` | string | `r16`, `qf`, `sf`, `third_place`, `final` |
 | `team_a` / `team_b` | string | Filled in once bracket is known |
+| `team_a_crest_url` / `team_b_crest_url` | string\|null | Flag/crest image URL, synced from the same source as `team_a`/`team_b` — display-only, never derived or looked up client-side |
 | `kickoff_at` | timestamp | Used to auto-lock predictions |
 | `real_score_a` / `real_score_b` | number\|null | Filled by admin after the match |
 | `locked` | boolean | Auto-true after kickoff |

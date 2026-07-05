@@ -33,12 +33,12 @@ test("buildResultFields extracts the full-time score once finished", () => {
   assert.deepEqual(buildResultFields(apiMatch), { real_score_a: 2, real_score_b: 1 });
 });
 
-test("buildFixturePatch maps stage, kickoff date, and both team names", () => {
+test("buildFixturePatch maps stage, kickoff date, both team names, and both crest URLs", () => {
   const apiMatch = {
     stage: "QUARTER_FINALS",
     utcDate: "2026-07-10T18:00:00Z",
-    homeTeam: { name: "Brazil" },
-    awayTeam: { name: "France" },
+    homeTeam: { name: "Brazil", crest: "https://crests.football-data.org/brazil.svg" },
+    awayTeam: { name: "France", crest: "https://crests.football-data.org/france.svg" },
   };
 
   const patch = buildFixturePatch(apiMatch);
@@ -47,15 +47,33 @@ test("buildFixturePatch maps stage, kickoff date, and both team names", () => {
   assert.equal(patch.kickoffDate.toISOString(), "2026-07-10T18:00:00.000Z");
   assert.equal(patch.team_a, "Brazil");
   assert.equal(patch.team_b, "France");
+  assert.equal(patch.team_a_crest_url, "https://crests.football-data.org/brazil.svg");
+  assert.equal(patch.team_b_crest_url, "https://crests.football-data.org/france.svg");
 });
 
-test("buildFixturePatch omits team fields when the API hasn't resolved them yet", () => {
+test("buildFixturePatch omits team and crest fields when the API hasn't resolved them yet", () => {
   const apiMatch = { stage: "LAST_16", utcDate: "2026-07-04T19:00:00Z", homeTeam: null, awayTeam: null };
 
   const patch = buildFixturePatch(apiMatch);
 
   assert.equal("team_a" in patch, false);
   assert.equal("team_b" in patch, false);
+  assert.equal("team_a_crest_url" in patch, false);
+  assert.equal("team_b_crest_url" in patch, false);
+});
+
+test("buildFixturePatch omits a crest URL when the API resolved the team name but not its crest", () => {
+  const apiMatch = {
+    stage: "LAST_16",
+    utcDate: "2026-07-04T19:00:00Z",
+    homeTeam: { name: "Brazil", crest: null },
+    awayTeam: { name: "France", crest: null },
+  };
+
+  const patch = buildFixturePatch(apiMatch);
+
+  assert.equal(patch.team_a, "Brazil");
+  assert.equal("team_a_crest_url" in patch, false);
 });
 
 test("findMatchingDoc matches a candidate within the tolerance window", () => {

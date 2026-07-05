@@ -134,7 +134,8 @@ above.
 `.github/workflows/sync-fixtures.yml` runs `automation/sync-fixtures.js` via
 two independent jobs on different schedules, pulling **all** World Cup 2026
 matches from [football-data.org](https://www.football-data.org/) and writing
-`team_a`/`team_b`/`kickoff_at`/`real_score_a`/`real_score_b` to Firestore.
+`team_a`/`team_b`/`team_a_crest_url`/`team_b_crest_url`/`kickoff_at`/`real_score_a`/`real_score_b`
+to Firestore.
 This replaces manual fixture/result entry once set up, but is optional —
 everything still works via `admin/seed.js` + the Firebase console without it.
 

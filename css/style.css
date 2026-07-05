@@ -58,6 +58,20 @@ h1 {
   flex: 1 1 auto;
 }
 
+.team-flag {
+  height: 1em;
+  width: 1.4em;
+  object-fit: cover;
+  vertical-align: middle;
+}
+
+.match-kickoff {
+  display: block;
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: #888;
+}
+
 .match-inputs {
   display: flex;
   align-items: center;
