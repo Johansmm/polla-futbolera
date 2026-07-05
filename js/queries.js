@@ -21,3 +21,8 @@ export async function fetchTeamRosters() {
   const snap = await getDocs(collection(db, "team_rosters"));
   return snap.docs.map((d) => d.data());
 }
+
+export async function fetchUserName(userId) {
+  const snap = await getDoc(doc(db, "users", userId));
+  return snap.exists() ? snap.data().name : null;
+}

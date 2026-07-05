@@ -307,7 +307,8 @@ js/firebase-config.js  public Firebase web config (not a secret)
 js/firebase-init.js    Firebase SDK init
 js/auth.js             token -> user_id resolution + anonymous-auth binding
 js/token-gate.js       shared token-resolution UI flow used by predict.js, special.js, and standings.js
-js/ui.js               tiny shared DOM helper (showStatus)
+js/nav.js              shared page nav; threads ?token= through every internal link
+js/ui.js               small shared DOM helpers (status/feedback, flag imgs, date formatting)
 js/queries.js          Firestore reads shared by special.js and standings.js (deadline, rosters)
 js/lock-logic.mjs      shared timing/lookup logic (isMatchLocked, isPastDeadline, findTeamForPlayer)
 js/scoring-logic.mjs   pure scoring functions (no stored points_earned — computed on read)

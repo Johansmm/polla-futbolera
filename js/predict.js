@@ -9,8 +9,9 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
-import { showStatus, formatKickoff, teamFlagImg } from "./ui.js";
+import { showStatus, showRetry, showSignedInName, formatKickoff, teamFlagImg } from "./ui.js";
 import { isMatchLocked } from "./lock-logic.mjs";
+import { fetchUserName } from "./queries.js";
 
 const PHASE_LABELS = {
   r16: "Round of 16",
@@ -24,6 +25,10 @@ const PHASE_ORDER = ["r16", "qf", "sf", "third_place", "final"];
 
 const statusEl = document.getElementById("status");
 const formEl = document.getElementById("predictions-form");
+
+// Match ids with edits not yet saved — each row saves individually, so
+// leaving the page mid-entry silently discards anything typed but unsaved.
+const dirtyMatches = new Set();
 
 async function fetchMatches() {
   const snap = await getDocs(query(collection(db, "matches"), orderBy("kickoff_at")));
@@ -49,55 +54,183 @@ function groupByPhase(matches) {
   return groups;
 }
 
+function teamLine(teamName, crestUrl, scoreHtml) {
+  return `
+    <div class="team-line">
+      <span class="team-flag-slot">${teamFlagImg(crestUrl)}</span>
+      <span class="team-name">${teamName ?? "To be decided"}</span>
+      ${scoreHtml}
+    </div>
+  `;
+}
+
+function scoreInputHtml(cls, teamName, value) {
+  return `<input
+    type="number"
+    class="${cls}"
+    inputmode="numeric"
+    pattern="[0-9]*"
+    min="0"
+    max="99"
+    step="1"
+    enterkeyhint="done"
+    autocomplete="off"
+    aria-label="${teamName ?? "Team"} goals"
+    value="${value ?? ""}"
+  />`;
+}
+
+function scoreTileHtml(value, extraClass = "") {
+  return `<span class="score-tile ${extraClass}">${value ?? "–"}</span>`;
+}
+
+// A locked row is read-only history: the score tiles keep the scoreboard
+// silhouette but recede, and once the real result is in, the row flips to
+// reading as a result card (final score in the tiles, your pick in a note)
+// so nobody has to visit the standings just to learn how a match ended.
+function renderLockedRow(row, match, prediction) {
+  const finished = match.real_score_a != null && match.real_score_b != null;
+
+  const pill = finished
+    ? '<span class="locked-label is-final">Final</span>'
+    : '<span class="locked-label">Locked</span>';
+
+  const tileA = finished ? match.real_score_a : prediction?.predicted_score_a;
+  const tileB = finished ? match.real_score_b : prediction?.predicted_score_b;
+
+  let note = "";
+  if (finished) {
+    note = prediction
+      ? `Your pick: ${prediction.predicted_score_a}–${prediction.predicted_score_b}`
+      : "You didn't predict this match";
+  } else if (!prediction) {
+    note = "No prediction saved";
+  }
+
+  row.classList.add("is-locked");
+  row.innerHTML = `
+    <div class="match-head">
+      <span class="match-kickoff">${formatKickoff(match)}</span>
+      ${pill}
+    </div>
+    ${teamLine(match.team_a, match.team_a_crest_url, scoreTileHtml(tileA, finished ? "is-final" : ""))}
+    ${teamLine(match.team_b, match.team_b_crest_url, scoreTileHtml(tileB, finished ? "is-final" : ""))}
+    ${note ? `<div class="match-note">${note}</div>` : ""}
+  `;
+}
+
 function renderMatchRow(match, prediction, userId) {
   const row = document.createElement("div");
   row.className = "match-row";
 
-  const locked = isMatchLocked(match);
+  if (isMatchLocked(match)) {
+    renderLockedRow(row, match, prediction);
+    return row;
+  }
 
   row.innerHTML = `
-    <div class="match-teams">
-      ${teamFlagImg(match.team_a_crest_url, match.team_a)} ${match.team_a ?? "?"}
-      vs
-      ${teamFlagImg(match.team_b_crest_url, match.team_b)} ${match.team_b ?? "?"}
+    <div class="match-head">
       <span class="match-kickoff">${formatKickoff(match)}</span>
     </div>
-    <div class="match-inputs">
-      <input type="number" min="0" class="score-a" value="${prediction?.predicted_score_a ?? ""}" ${locked ? "disabled" : ""} />
-      <span>-</span>
-      <input type="number" min="0" class="score-b" value="${prediction?.predicted_score_b ?? ""}" ${locked ? "disabled" : ""} />
-      <button type="button" class="save-btn" ${locked ? "disabled" : ""}>Save</button>
+    ${teamLine(match.team_a, match.team_a_crest_url, scoreInputHtml("score-a", match.team_a, prediction?.predicted_score_a))}
+    ${teamLine(match.team_b, match.team_b_crest_url, scoreInputHtml("score-b", match.team_b, prediction?.predicted_score_b))}
+    <div class="match-actions">
+      <div class="save-feedback" role="status" hidden></div>
+      <button type="button" class="save-btn" aria-label="Save prediction for ${match.team_a ?? "?"} vs ${match.team_b ?? "?"}">Save</button>
     </div>
-    ${locked ? '<div class="locked-label">Locked</div>' : ""}
-    <div class="save-feedback" hidden></div>
   `;
-
-  if (locked) return row;
 
   const scoreAInput = row.querySelector(".score-a");
   const scoreBInput = row.querySelector(".score-b");
   const saveBtn = row.querySelector(".save-btn");
   const feedback = row.querySelector(".save-feedback");
 
+  let hideFeedbackTimer = null;
+  // Last successfully stored values, as input strings — dirtiness is
+  // "differs from what's saved", not "was ever typed in", so edits that
+  // restore the saved score don't leave a stale warning behind.
+  let savedA = prediction?.predicted_score_a?.toString() ?? "";
+  let savedB = prediction?.predicted_score_b?.toString() ?? "";
+
+  function refreshDirty() {
+    clearTimeout(hideFeedbackTimer);
+    feedback.hidden = true;
+    // badInput: the box displays text (e.g. a stray "e") that doesn't
+    // parse, so .value is "" and would wrongly compare as clean.
+    const dirty =
+      scoreAInput.validity.badInput ||
+      scoreBInput.validity.badInput ||
+      scoreAInput.value !== savedA ||
+      scoreBInput.value !== savedB;
+    row.classList.toggle("is-dirty", dirty);
+    if (dirty) {
+      dirtyMatches.add(match.id);
+    } else {
+      dirtyMatches.delete(match.id);
+    }
+  }
+
+  function markSaved() {
+    row.classList.remove("is-dirty");
+    dirtyMatches.delete(match.id);
+  }
+
+  // Locks the row in place when a save is rejected because kickoff passed
+  // while the tab sat open — the initial render only knows lock state as of
+  // page load.
+  function lockRowLate() {
+    markSaved();
+    scoreAInput.disabled = true;
+    scoreBInput.disabled = true;
+    row.classList.add("is-locked");
+  }
+
+  for (const input of [scoreAInput, scoreBInput]) {
+    input.addEventListener("input", refreshDirty);
+    input.addEventListener("keydown", (event) => {
+      // Enter would otherwise be a silent no-op (the form has no submit
+      // button) — make it save this row, matching the keyboard's Done key.
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveBtn.click();
+      }
+    });
+  }
+
   saveBtn.addEventListener("click", async () => {
-    const predictedScoreA = Number.parseInt(scoreAInput.value, 10);
-    const predictedScoreB = Number.parseInt(scoreBInput.value, 10);
+    const rawA = scoreAInput.value.trim();
+    const rawB = scoreBInput.value.trim();
+    const predictedScoreA = Number(rawA);
+    const predictedScoreB = Number(rawB);
 
-    feedback.classList.remove("error");
+    clearTimeout(hideFeedbackTimer);
+    feedback.hidden = true;
 
+    // The 0–99 bound mirrors the input's own min/max and keeps the value
+    // in safe-integer range — Firestore's rules only accept ints, and an
+    // out-of-range number would serialize as a double and be rejected
+    // with the same error code as a locked match.
     if (
-      Number.isNaN(predictedScoreA) ||
-      Number.isNaN(predictedScoreB) ||
+      rawA === "" ||
+      rawB === "" ||
+      !Number.isSafeInteger(predictedScoreA) ||
+      !Number.isSafeInteger(predictedScoreB) ||
       predictedScoreA < 0 ||
-      predictedScoreB < 0
+      predictedScoreB < 0 ||
+      predictedScoreA > 99 ||
+      predictedScoreB > 99
     ) {
-      feedback.textContent = "Enter a valid score.";
-      feedback.classList.add("error");
-      feedback.hidden = false;
+      showStatus(feedback, "Enter both scores as whole numbers between 0 and 99.", true);
       return;
     }
 
+    let lockedDuringSave = false;
     saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    // Freeze the row while the write is in flight — an edit typed mid-save
+    // would otherwise be wiped from dirty-tracking when the save resolves.
+    scoreAInput.disabled = true;
+    scoreBInput.disabled = true;
     try {
       await setDoc(
         doc(db, "predictions", `${userId}_${match.id}`),
@@ -110,13 +243,36 @@ function renderMatchRow(match, prediction, userId) {
         },
         { merge: true }
       );
-      feedback.textContent = "Saved.";
+      savedA = String(predictedScoreA);
+      savedB = String(predictedScoreB);
+      // Canonicalize the display (e.g. "03" -> "3") so it matches the
+      // stored value dirtiness is compared against.
+      scoreAInput.value = savedA;
+      scoreBInput.value = savedB;
+      markSaved();
+      showStatus(feedback, "Saved");
+      hideFeedbackTimer = setTimeout(() => {
+        feedback.hidden = true;
+      }, 4000);
     } catch (err) {
-      feedback.textContent = "Couldn't save (has the match already kicked off?).";
-      feedback.classList.add("error");
+      // Trust the server's verdict over the client clock and the match
+      // object fetched at page load: an admin can lock a match early, and
+      // a skewed device clock must not turn a network blip into a bogus
+      // "locked" message.
+      if (err?.code === "permission-denied") {
+        lockedDuringSave = true;
+        lockRowLate();
+        showStatus(feedback, "This match is locked — predictions closed.", true);
+      } else {
+        showStatus(feedback, "Couldn't save — check your connection and try again.", true);
+      }
     } finally {
-      feedback.hidden = false;
-      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+      saveBtn.disabled = lockedDuringSave;
+      if (!lockedDuringSave) {
+        scoreAInput.disabled = false;
+        scoreBInput.disabled = false;
+      }
     }
   });
 
@@ -131,15 +287,31 @@ function renderForm(matches, predictions, userId) {
     const phaseMatches = groups[phase];
     if (!phaseMatches?.length) continue;
 
-    const section = document.createElement("section");
-    section.className = "phase-section";
-
     const heading = document.createElement("h2");
     heading.textContent = PHASE_LABELS[phase] ?? phase;
+
+    const section = document.createElement("section");
+    section.className = "phase-section";
     section.appendChild(heading);
 
+    // A fully locked phase is history — collapse its rows so the first
+    // thing on screen is always the next match that can still be
+    // predicted. The <details> wraps only the rows, keeping the phase
+    // heading a real heading for assistive tech.
+    let rowContainer = section;
+    if (phaseMatches.every(isMatchLocked)) {
+      const details = document.createElement("details");
+      details.className = "locked-rows";
+      const summary = document.createElement("summary");
+      summary.textContent =
+        phaseMatches.length === 1 ? "1 locked match" : `${phaseMatches.length} locked matches`;
+      details.appendChild(summary);
+      section.appendChild(details);
+      rowContainer = details;
+    }
+
     for (const match of phaseMatches) {
-      section.appendChild(renderMatchRow(match, predictions[match.id], userId));
+      rowContainer.appendChild(renderMatchRow(match, predictions[match.id], userId));
     }
 
     formEl.appendChild(section);
@@ -148,18 +320,44 @@ function renderForm(matches, predictions, userId) {
   formEl.hidden = false;
 }
 
+// The form has no submit button, so no browser should ever implicitly
+// submit it — but if one did, the default GET navigation would strip
+// ?token= and sign the user out mid-entry.
+formEl.addEventListener("submit", (event) => event.preventDefault());
+
+window.addEventListener("beforeunload", (event) => {
+  if (dirtyMatches.size) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+
 async function main() {
   const userId = await resolveUserFromToken(statusEl);
   if (!userId) return;
 
+  showStatus(statusEl, "Loading matches…");
+  fetchUserName(userId)
+    .then(showSignedInName)
+    .catch(() => {});
+
+  let matches;
+  let predictions;
   try {
-    const matches = await fetchMatches();
-    const predictions = await fetchPredictions(userId, matches);
-    statusEl.hidden = true;
-    renderForm(matches, predictions, userId);
+    matches = await fetchMatches();
+    predictions = await fetchPredictions(userId, matches);
   } catch (err) {
-    showStatus(statusEl, "Couldn't load the matches.", true);
+    showRetry(statusEl, "Couldn't load the matches.", () => window.location.reload());
+    return;
   }
+
+  if (!matches.length) {
+    showStatus(statusEl, "No matches to predict yet — check back once the bracket is set.");
+    return;
+  }
+
+  statusEl.hidden = true;
+  renderForm(matches, predictions, userId);
 }
 
 main();

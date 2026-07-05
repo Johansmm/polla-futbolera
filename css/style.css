@@ -1,199 +1,825 @@
+/* "Matchday" design system — one stylesheet, no build step.
+ *
+ * Every color in the components below references a semantic token defined
+ * here (zero raw hex outside :root), so the dark palette can't drift as
+ * components are added: the @media (prefers-color-scheme: dark) block
+ * re-points the tokens and everything follows. Native widgets (select
+ * popups, scrollbars, dialogs) follow the OS via color-scheme. */
+
 :root {
   color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Type */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-score: ui-rounded, "SF Pro Rounded", var(--font-sans);
+
+  /* Space & shape */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-s: 8px;
+  --radius-m: 12px;
+  --radius-l: 16px;
+  --radius-pill: 999px;
+  --control-h: 44px; /* minimum touch target */
+  --tile-size: 52px; /* score tiles */
+
+  /* Motion — a single guard: reduced-motion zeroes the duration token */
+  --dur: 160ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  /* Palette: light (all pairings AA-checked) */
+  --bg: #eef4ef;
+  --surface: #ffffff;
+  --surface-2: #f5faf6;
+  --line: #dbe5dd;
+  --line-strong: #a8bcae;
+  --ink: #14231a;
+  --ink-soft: #46564c;
+  --ink-faint: #5f6f65;
+  --accent: #0e7a3d;
+  --accent-strong: #0a5c2e; /* hover: darker in light mode, brighter in dark */
+  --accent-contrast: #ffffff;
+  --accent-text: #0b6332;
+  --accent-tint: #e0f0e5;
+  --gold: #eab308; /* leader fills/icons only, never small text */
+  --gold-ink: #211a04;
+  --gold-tint: #fdf3d7;
+  --danger-text: #b3261e;
+  --danger-tint: #fdecea;
+  --danger-border: #f0b9b5;
+  --up: #187339;
+  --down: #b3261e;
+  --tile-bg: #0f2417; /* scoreboard tiles stay dark in both modes */
+  --tile-ink: #f2fbf4;
+  --tile-line: #2c4a37;
+  --ring: #0e7a3d;
+  --shadow-1: 0 1px 2px rgb(10 30 18 / 0.06), 0 1px 3px rgb(10 30 18 / 0.08);
+  --shadow-2: 0 2px 6px rgb(10 30 18 / 0.08), 0 8px 24px rgb(10 30 18 / 0.08);
+
+  /* Select chevron: mid-grey stroke legible on light and dark surfaces */
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23807a72' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  font-family: var(--font-sans);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b120e;
+    --surface: #141d17;
+    --surface-2: #1a2620;
+    --line: #27342c;
+    --line-strong: #41544a;
+    --ink: #e7efe9;
+    --ink-soft: #b3c2b8;
+    --ink-faint: #93a399;
+    --accent: #26a95c;
+    --accent-strong: #31bd6c;
+    --accent-contrast: #04150c;
+    --accent-text: #5bd189;
+    --accent-tint: #15301f;
+    --gold: #f5c518;
+    --gold-tint: #2b2410;
+    --danger-text: #ff9e95;
+    --danger-tint: #391512;
+    --danger-border: #86352d;
+    --up: #57c07f;
+    --down: #ff9e95;
+    --tile-bg: #0a130d; /* below --surface so tiles read as inset */
+    --tile-line: #35543f;
+    --ring: #5bd189;
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-2: 0 2px 8px rgb(0 0 0 / 0.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
+  }
+}
+
+/* ---- base ---- */
 
 body {
   margin: 0;
-  background: #f5f5f7;
-  color: #1a1a1a;
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.5;
 }
 
 .container {
   max-width: 640px;
   margin: 0 auto;
-  padding: 24px 16px 64px;
+  padding: var(--space-5) var(--space-4) 64px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+a,
+button,
+summary,
+input,
+select {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: var(--accent-text);
+}
+
+/* ---- page header ---- */
+
+.eyebrow {
+  margin: 0 0 var(--space-1);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
 }
 
 h1 {
-  font-size: 1.5rem;
-  margin-bottom: 8px;
+  margin: 0;
+  font-size: clamp(1.5rem, 5vw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
 }
 
-.status {
-  padding: 12px;
-  border-radius: 8px;
-  background: #fff;
-  border: 1px solid #ddd;
+/* The one decorative gradient in the app. */
+h1::after {
+  content: "";
+  display: block;
+  width: 64px;
+  height: 4px;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--accent), var(--gold));
 }
 
-.status.error {
-  background: #fdecea;
-  border-color: #f5c2c0;
-  color: #a4262c;
+.signed-in {
+  margin: var(--space-2) 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
 }
 
-.phase-section {
-  margin-top: 24px;
-}
-
-.phase-section h2 {
-  font-size: 1.1rem;
-  border-bottom: 2px solid #333;
-  padding-bottom: 4px;
-}
-
-.match-row {
+.page-nav {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 12px 0;
-  border-bottom: 1px solid #e0e0e0;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-4);
 }
 
-.match-teams {
+.nav-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--accent-text);
+  font-size: 0.9rem;
   font-weight: 600;
-  flex: 1 1 auto;
+  text-decoration: none;
+  transition: background var(--dur) var(--ease);
 }
 
-.team-flag {
-  height: 1em;
-  width: 1.4em;
-  object-fit: cover;
-  vertical-align: middle;
+a.nav-chip:hover,
+a.nav-chip:active {
+  background: var(--accent-tint);
 }
 
-.match-kickoff {
-  display: block;
-  font-weight: 400;
-  font-size: 0.85rem;
-  color: #888;
-}
-
-.match-inputs {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.match-inputs input[type="number"] {
-  width: 48px;
-  padding: 4px;
-  text-align: center;
-}
-
-.locked-label {
-  font-size: 0.85rem;
-  color: #888;
-}
-
-.save-feedback {
-  font-size: 0.85rem;
-  width: 100%;
-}
-
-.save-feedback.error {
-  color: #a4262c;
+.nav-chip.is-current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
 }
 
 .hint {
-  color: #666;
+  margin: var(--space-1) 0 var(--space-3);
+  color: var(--ink-faint);
   font-size: 0.9rem;
-  margin-top: -8px;
+}
+
+/* ---- status / feedback ---- */
+
+.status {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.status.error {
+  background: var(--danger-tint);
+  border-color: var(--danger-border);
+  border-left-color: var(--danger-text);
+  color: var(--danger-text);
+}
+
+/* Secondary button — the retry/switch-account buttons injected into
+ * .status by js/ui.js and js/token-gate.js. */
+.status button {
+  min-height: var(--control-h);
+  margin-top: var(--space-2);
+  padding: 0 var(--space-4);
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--accent-text);
+  font: 600 0.95rem/1 var(--font-sans);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.status button:hover {
+  background: var(--accent-tint);
+}
+
+.status button:disabled {
+  border-color: var(--line-strong);
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+.save-feedback {
+  width: 100%;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+
+.save-feedback::before {
+  content: "✓ ";
+}
+
+.save-feedback.error {
+  color: var(--danger-text);
+}
+
+.save-feedback.error::before {
+  content: "⚠ ";
+}
+
+/* ---- phase sections (predict + special) ---- */
+
+.phase-section {
+  margin-top: var(--space-5);
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.phase-section h2 {
+  margin: 0;
+  padding: var(--space-3) 0 var(--space-2);
+  border-bottom: 2px solid var(--accent);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+/* Collapsed rows of a fully locked phase (a <details> under the h2). */
+.locked-rows > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.85rem;
+  color: var(--ink-faint);
+}
+
+.locked-rows > summary::-webkit-details-marker {
+  display: none;
+}
+
+.locked-rows > summary::after {
+  content: "▾";
+}
+
+.locked-rows[open] > summary::after {
+  content: "▴";
+}
+
+.locked-rows[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---- match rows ---- */
+
+.match-row {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.match-row:last-child {
+  border-bottom: 0;
+  padding-bottom: var(--space-1);
+}
+
+.match-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.match-kickoff {
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.locked-label {
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.locked-label::before {
+  content: "🔒 ";
+}
+
+.locked-label.is-final {
+  border-color: var(--accent-tint);
+  background: var(--accent-tint);
+  color: var(--accent-text);
+}
+
+.locked-label.is-final::before {
+  content: "";
+}
+
+.team-line {
+  display: grid;
+  grid-template-columns: 24px 1fr var(--tile-size);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.team-flag-slot {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.team-flag {
+  width: 20px;
+  height: 14px;
+  object-fit: cover;
+  border-radius: 2px;
+  /* keyline so white flag fields neither vanish on light surfaces nor
+   * bloom on dark ones */
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.team-name {
+  min-width: 0;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+/* The hero: score entry as scoreboard tiles — also the largest touch
+ * target on the page. Dark in both modes; "dark tile = type here". */
+.team-line input[type="number"] {
+  width: var(--tile-size);
+  height: var(--tile-size);
+  padding: 0;
+  border: 1px solid var(--tile-line);
+  border-radius: var(--radius-m);
+  background: var(--tile-bg);
+  color: var(--tile-ink);
+  caret-color: var(--gold);
+  font: 800 1.5rem/1 var(--font-score);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.team-line input[type="number"]::-webkit-inner-spin-button,
+.team-line input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.team-line input[type="number"]:focus-visible {
+  border-color: var(--accent);
+}
+
+.team-line input[type="number"]:disabled {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--ink-soft);
+}
+
+/* Read-only tiles on locked rows: your pick recedes to a quiet ghost;
+ * a known final result reads at full strength. */
+.score-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tile-size);
+  height: var(--tile-size);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface-2);
+  color: var(--ink-faint);
+  font: 700 1.5rem/1 var(--font-score);
+  font-variant-numeric: tabular-nums;
+}
+
+.score-tile.is-final {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.match-note {
+  margin-top: var(--space-1);
+  font-size: 0.85rem;
+  color: var(--ink-faint);
+}
+
+.match-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.match-actions .save-feedback {
+  width: auto;
+  flex: 1;
+}
+
+/* Unsaved edits: say so, and make Save impossible to miss. */
+.match-row.is-dirty .match-actions::before {
+  content: "Not saved yet";
+  flex: 1;
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--ink-faint);
+}
+
+/* When feedback is showing (e.g. a validation error on a still-dirty row),
+ * it takes the note's place. Without :has() support both lines show — fine. */
+.match-row.is-dirty .match-actions:has(.save-feedback:not([hidden]))::before {
+  content: none;
+}
+
+.match-row.is-dirty .save-btn {
+  background: var(--gold);
+  color: var(--gold-ink);
+}
+
+/* ---- buttons ---- */
+
+.save-btn,
+#submit-btn {
+  min-height: var(--control-h);
+  padding: 0 var(--space-5);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font: 700 0.95rem/1 var(--font-sans);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.save-btn:hover,
+#submit-btn:hover {
+  background: var(--accent-strong);
+}
+
+.save-btn:active,
+#submit-btn:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.save-btn:disabled,
+#submit-btn:disabled {
+  background: var(--line);
+  color: var(--ink-faint);
+  box-shadow: none;
+  cursor: default;
+}
+
+#submit-btn {
+  width: 100%;
+  margin-top: var(--space-5);
+}
+
+#submit-feedback {
+  margin-top: var(--space-2);
+}
+
+/* ---- special page ---- */
+
+label {
+  display: block;
+  margin-top: var(--space-3);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
 }
 
 select {
   display: block;
   width: 100%;
-  padding: 8px;
-  margin-top: 8px;
-  font-size: 1rem;
+  min-height: var(--control-h);
+  margin-top: var(--space-1);
+  padding: 0 var(--space-6) 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--surface-2) var(--chevron) no-repeat right 12px center / 16px;
+  color: var(--ink);
+  font: inherit;
+  appearance: none;
+  transition: border-color var(--dur) var(--ease);
 }
 
-#submit-btn {
-  margin-top: 24px;
-  padding: 10px 16px;
-  font-size: 1rem;
+select:focus-visible {
+  border-color: var(--accent);
+}
+
+select:disabled {
+  background-color: var(--bg);
+  color: var(--ink-faint);
 }
 
 #locked-view {
-  margin-top: 24px;
-  padding: 16px;
-  border-radius: 8px;
-  background: #fff;
-  border: 1px solid #ddd;
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--gold);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
 }
 
 #locked-view p {
-  margin: 8px 0;
+  margin: var(--space-2) 0;
+}
+
+/* ---- standings ---- */
+
+#standings-table {
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 16px;
-  background: #fff;
 }
 
-th,
-td {
-  padding: 8px;
-  text-align: left;
-  border-bottom: 1px solid #e0e0e0;
+#standings-table table {
+  min-width: 560px;
 }
 
 th {
-  border-bottom: 2px solid #333;
+  padding: 10px var(--space-3);
+  border-bottom: 2px solid var(--line-strong);
+  background: var(--surface-2);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+td {
+  padding: 10px var(--space-3);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+th.num,
+td.num {
+  text-align: right;
+}
+
+.name-cell {
+  white-space: nowrap;
+}
+
+.you-tag {
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+
+.me-row td {
+  background: var(--accent-tint);
+}
+
+/* The payoff. .leader-row is set from the computed rank, so tied
+ * co-leaders all get the crown; it sits after .me-row so gold wins when
+ * the viewer is the leader. */
+.leader-row td {
+  background: var(--gold-tint);
+  font-weight: 650;
+}
+
+.leader-row td:first-child {
+  white-space: nowrap;
+}
+
+.leader-row td:first-child::before {
+  content: "🏆 ";
 }
 
 .delta-positive {
-  color: #1a7f37;
-  font-weight: 600;
+  color: var(--up);
+  font-weight: 650;
 }
 
 .delta-negative {
-  color: #a4262c;
-  font-weight: 600;
+  color: var(--down);
+  font-weight: 650;
 }
 
 .delta-neutral {
-  color: #666;
+  color: var(--ink-faint);
 }
 
 .columns-help {
-  margin-top: 8px;
-  color: #666;
+  margin-top: var(--space-2);
+  color: var(--ink-faint);
   font-size: 0.9rem;
 }
 
 .columns-help summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--control-h);
   cursor: pointer;
+  /* Suppress the native marker everywhere (Safari still draws it under
+   * display:flex) and provide our own. */
+  list-style: none;
+}
+
+.columns-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.columns-help summary::before {
+  content: "▸";
+}
+
+.columns-help[open] summary::before {
+  content: "▾";
 }
 
 .columns-help ul {
-  margin: 8px 0 0;
+  margin: var(--space-2) 0 0;
   padding-left: 20px;
 }
 
 .columns-help li {
-  margin: 4px 0;
+  margin: var(--space-1) 0;
+}
+
+/* ---- breakdown accordions ---- */
+
+#breakdown-sections {
+  margin-top: var(--space-6);
+}
+
+/* Group headings ("Match by match", "Special picks") rendered by
+ * standings.js as real h2s, so heading navigation finds them. */
+.sections-heading {
+  margin: var(--space-5) 0 var(--space-1);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+#breakdown-sections > .sections-heading:first-child {
+  margin-top: 0;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .breakdown-section {
-  margin-top: 12px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  background: #fff;
-  border: 1px solid #ddd;
+  margin-top: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
 }
 
 .breakdown-section summary {
+  position: relative;
+  padding: var(--space-3) var(--space-6) var(--space-3) var(--space-4);
   cursor: pointer;
-  font-weight: 600;
+  list-style: none;
+  transition: background var(--dur) var(--ease);
 }
 
-.breakdown-section table {
-  margin-top: 8px;
+.breakdown-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.breakdown-section summary:hover {
+  background: var(--surface-2);
+}
+
+.breakdown-section summary::after {
+  content: "▾";
+  position: absolute;
+  right: var(--space-4);
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--ink-faint);
+  transition: rotate var(--dur) var(--ease);
+}
+
+.breakdown-section[open] summary::after {
+  rotate: 180deg;
+}
+
+.breakdown-section[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.summary-title {
+  display: block;
+  font-weight: 700;
+}
+
+.summary-sub {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.pending {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+
+/* ---- landing page ---- */
+
+.landing {
+  padding-top: 96px;
+  text-align: center;
+}
+
+.landing h1::after {
+  margin-left: auto;
+  margin-right: auto;
 }

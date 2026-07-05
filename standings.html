@@ -4,34 +4,36 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Standings — Poya World Cup 2026</title>
+  <meta name="theme-color" content="#eef4ef" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0b120e" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <main class="container">
-    <h1>Standings</h1>
-    <p><a id="predict-link" href="predict.html">← Back to my predictions</a></p>
-    <p id="status" class="status" hidden></p>
+    <header class="page-header">
+      <p class="eyebrow">⚽ Poya · World Cup 2026</p>
+      <h1>Standings</h1>
+      <p id="user-name" class="signed-in" hidden></p>
+      <nav id="site-nav" class="page-nav" aria-label="Pages"></nav>
+    </header>
+    <p id="status" class="status" role="status" hidden></p>
     <p id="standings-note" class="hint" hidden></p>
-    <details class="columns-help">
+    <details id="columns-help" class="columns-help" hidden>
       <summary>What do these columns mean?</summary>
       <ul>
-        <li><strong>Predictions submitted:</strong> how many of the already-locked matches this user actually predicted, out of the total locked so far.</li>
-        <li><strong>Exact hits:</strong> matches where the user guessed the exact final score.</li>
-        <li><strong>vs. Average (pts):</strong> how far this user's total is above (green, +) or below (red, -) the group's average total.</li>
-        <li><strong>Matches (pts):</strong> points earned from match predictions (outcome tier × phase multiplier), summed across every scored match.</li>
-        <li><strong>Special (pts):</strong> combined points from the champion and top scorer picks.</li>
-        <li><strong>Total (pts):</strong> Matches (pts) + Special (pts).</li>
+        <li><strong>Preds:</strong> how many of the already-locked matches this player actually predicted, out of the total locked so far.</li>
+        <li><strong>Exact:</strong> matches where the player guessed the exact final score.</li>
+        <li><strong>Match pts:</strong> points earned from match predictions (outcome tier × phase multiplier), summed across every scored match.</li>
+        <li><strong>Special:</strong> combined points from the champion and top scorer picks.</li>
+        <li><strong>Total:</strong> Match pts + Special.</li>
+        <li><strong>± Avg:</strong> how many points above (green, +) or below (red, −) the group's average total.</li>
       </ul>
     </details>
     <div id="standings-table" hidden></div>
     <div id="breakdown-sections" hidden></div>
   </main>
-  <script>
-    const token = new URLSearchParams(window.location.search).get("token");
-    if (token) {
-      document.getElementById("predict-link").href = `predict.html?token=${encodeURIComponent(token)}`;
-    }
-  </script>
+  <script type="module" src="js/nav.js"></script>
   <script type="module" src="js/standings.js"></script>
 </body>
 </html>
