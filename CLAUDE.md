@@ -226,11 +226,6 @@ anywhere else in Firestore, so an admin sets those once in
 
 ## Not yet defined (decide during implementation, don't block on upfront spec)
 
-- **Prediction UI**: layout of the screen where a user enters their score
-  for each pending match. Group by phase? One match per screen or a list?
-- **Dashboard/standings**: what it shows (simple ranking table vs. also
-  per-phase breakdown, history, charts) and whether it's public to all users
-  at all times or only unlocked progressively.
 - **Admin panel**: how Johan will load the real fixture (team_a/team_b once
   brackets are known), enter real match results, and generate/regenerate
   user tokens. Could be a protected view in the same app, or direct edits in
