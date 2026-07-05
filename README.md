@@ -138,12 +138,11 @@ matches from [football-data.org](https://www.football-data.org/) and writing
 This replaces manual fixture/result entry once set up, but is optional —
 everything still works via `admin/seed.js` + the Firebase console without it.
 
-- `full-sync` runs unconditionally every 3 hours (and on-demand via the
-  Actions tab). This is the one that discovers matches no one's synced
-  before and fills in `team_a`/`team_b` as the bracket resolves — there's no
-  local state to check before calling the API for that, so it always polls,
-  but it's a single bulk request per run regardless of how many matches
-  exist, so a 3-hourly cadence is cheap.
+- `full-sync` runs unconditionally every 3 hours. This is the one that
+  discovers matches no one's synced before and fills in `team_a`/`team_b` as
+  the bracket resolves — there's no local state to check before calling the
+  API for that, so it always polls, but it's a single bulk request per run
+  regardless of how many matches exist, so a 3-hourly cadence is cheap.
 - `fast-sync` runs every 15 minutes, but calls `sync-fixtures.js
   --only-if-pending`, which first checks Firestore for any match whose
   `kickoff_at` has already passed with no `real_score_a` set yet
@@ -151,6 +150,10 @@ everything still works via `admin/seed.js` + the Firebase console without it.
   there isn't one. This is what gets a just-finished match's score into
   Firestore within minutes instead of waiting for the next 3-hourly tick,
   without spending extra API calls between matches.
+
+Both can also be run on-demand from the Actions tab (`workflow_dispatch`) —
+pick which one via the "Which job to run" input, which defaults to
+`full-sync`.
 
 The sync deliberately doesn't filter by stage (group stage, and the Round of
 32 that World Cup 2026's expanded format adds before Round of 16, get synced
