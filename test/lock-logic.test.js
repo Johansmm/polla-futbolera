@@ -7,9 +7,10 @@ const assert = require("node:assert/strict");
 let isMatchLocked;
 let isPastDeadline;
 let findTeamForPlayer;
+let kickoffDate;
 
 test.before(async () => {
-  ({ isMatchLocked, isPastDeadline, findTeamForPlayer } = await import("../js/lock-logic.mjs"));
+  ({ isMatchLocked, isPastDeadline, findTeamForPlayer, kickoffDate } = await import("../js/lock-logic.mjs"));
 });
 
 const HOUR = 60 * 60 * 1000;
@@ -69,4 +70,15 @@ test("findTeamForPlayer finds the team owning a given player", () => {
 test("findTeamForPlayer returns null when no team has that player", () => {
   const rosters = [{ team: "France", players: ["Kylian Mbappé"] }];
   assert.equal(findTeamForPlayer(rosters, "Someone Else"), null);
+});
+
+test("kickoffDate passes through a plain Date/ISO value", () => {
+  const date = new Date(Date.now() + HOUR);
+  assert.equal(kickoffDate({ kickoff_at: date }).getTime(), date.getTime());
+});
+
+test("kickoffDate unwraps a Firestore Timestamp-like object (.toDate())", () => {
+  const date = new Date(Date.now() + HOUR);
+  const timestampLike = { toDate: () => date };
+  assert.equal(kickoffDate({ kickoff_at: timestampLike }).getTime(), date.getTime());
 });

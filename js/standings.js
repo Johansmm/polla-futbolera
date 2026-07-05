@@ -9,8 +9,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
-import { showStatus } from "./ui.js";
-import { isPastDeadline, isMatchLocked, findTeamForPlayer } from "./lock-logic.mjs";
+import { showStatus, formatKickoff } from "./ui.js";
+import { isPastDeadline, isMatchLocked, kickoffDate, findTeamForPlayer } from "./lock-logic.mjs";
 import {
   scoreMatchBreakdown,
   calculateChampionPoints,
@@ -33,10 +33,6 @@ const statusEl = document.getElementById("status");
 const noteEl = document.getElementById("standings-note");
 const tableEl = document.getElementById("standings-table");
 const sectionsEl = document.getElementById("breakdown-sections");
-
-function kickoffDate(match) {
-  return match.kickoff_at?.toDate ? match.kickoff_at.toDate() : new Date(match.kickoff_at);
-}
 
 async function fetchScoringConfig() {
   const res = await fetch("scoring_config.json");
@@ -173,7 +169,7 @@ async function computeStandings() {
   const matchSections = [...scorableMatches]
     .sort((a, b) => kickoffDate(b) - kickoffDate(a))
     .map((match) => ({
-      title: `${PHASE_LABELS[match.phase] ?? match.phase}: ${match.team_a ?? "?"} vs ${match.team_b ?? "?"}`,
+      title: `${PHASE_LABELS[match.phase] ?? match.phase}: ${match.team_a ?? "?"} vs ${match.team_b ?? "?"} — ${formatKickoff(match)}`,
       entries: rows.map((row) => {
         const breakdown = row.matchBreakdown.find((b) => b.match.id === match.id);
         const prediction = breakdown?.prediction
