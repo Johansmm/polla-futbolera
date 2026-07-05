@@ -18,7 +18,7 @@ name: Sync World Cup Fixtures
 on:
   schedule:
     - cron: "30 1/3 * * *" # every 3 hours, offset from :00
-    - cron: "*/15 * * * *" # every 15 minutes
+    - cron: "3,18,33,48 * * * *" # every 15 min, offset off :00/:15/:30/:45 (GitHub's busiest minutes, where scheduled runs are most likely to be delayed or dropped)
   workflow_dispatch:
     inputs:
       job:
@@ -52,7 +52,7 @@ jobs:
         run: node sync-fixtures.js
 
   fast-sync:
-    if: github.event.schedule == '*/15 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'fast-sync')
+    if: github.event.schedule == '3,18,33,48 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'fast-sync')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
