@@ -88,6 +88,20 @@ function buildResultFields(apiMatch) {
   };
 }
 
+// live_score_a/b are a running score shown while a match is in progress,
+// entirely separate from real_score_a/b (the final result, set once at
+// FINISHED and never touched here). Cleared back to null at FINISHED so a
+// match's live/finished state stays inferable from these two fields alone.
+function buildLiveScoreFields(apiMatch) {
+  if (apiMatch.status === "IN_PLAY" || apiMatch.status === "PAUSED") {
+    return { live_score_a: apiMatch.score.fullTime.home, live_score_b: apiMatch.score.fullTime.away };
+  }
+  if (apiMatch.status === "FINISHED") {
+    return { live_score_a: null, live_score_b: null };
+  }
+  return {};
+}
+
 function buildFixturePatch(apiMatch) {
   const patch = {
     phase: resolvePhase(apiMatch.stage),
@@ -135,6 +149,7 @@ module.exports = {
   MATCH_TOLERANCE_MS,
   resolvePhase,
   buildResultFields,
+  buildLiveScoreFields,
   buildFixturePatch,
   findMatchingDoc,
   generateMatchId,
@@ -235,12 +250,16 @@ if (require.main === module) {
     // which is the whole point of this script (unlike admin/seed.js, which
     // deliberately never touches these fields once set).
     const resultFields = buildResultFields(apiMatch);
+    const liveScoreFields = buildLiveScoreFields(apiMatch);
 
     const phaseCandidates = matchDocs.filter((d) => d.phase === phase && d.kickoffAt);
     const existing = findMatchingDoc(phaseCandidates, kickoffDate);
 
     if (existing) {
-      await db.collection("matches").doc(existing.id).set({ ...fixtureFields, ...resultFields }, { merge: true });
+      await db
+        .collection("matches")
+        .doc(existing.id)
+        .set({ ...fixtureFields, ...resultFields, ...liveScoreFields }, { merge: true });
       return { matchId: existing.id, action: "updated" };
     }
 
@@ -255,9 +274,12 @@ if (require.main === module) {
       team_b_crest_url: null,
       real_score_a: null,
       real_score_b: null,
+      live_score_a: null,
+      live_score_b: null,
       locked: false,
       ...fixtureFields,
       ...resultFields,
+      ...liveScoreFields,
     });
 
     matchDocs.push({ id: matchId, phase, kickoffAt: kickoffDate, real_score_a: resultFields.real_score_a ?? null });
