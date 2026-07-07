@@ -18,6 +18,8 @@ import {
   finishedMatches,
   deriveChampion,
   deriveSemifinalists,
+  isMatchLive,
+  effectiveScore,
 } from "./scoring-logic.mjs";
 import { fetchSpecialPredictionsDeadline, fetchTeamRosters, fetchUserName } from "./queries.js";
 
@@ -108,6 +110,7 @@ async function computeStandings() {
   const specialRevealed = isPastDeadline(specialDeadline, false);
   const specialPicks = specialRevealed ? await fetchSpecialPredictions() : {};
 
+  const anyMatchLive = matches.some(isMatchLive);
   const { champion, finalists } = deriveChampion(matches);
   const semifinalists = deriveSemifinalists(matches);
   const topScorer = tournamentResults?.top_scorer ?? null;
@@ -122,10 +125,11 @@ async function computeStandings() {
       const prediction = predictionsByMatch[match.id]?.[user.user_id];
       if (prediction) predictionsSubmitted += 1;
 
+      const live = isMatchLive(match);
       const { points, exactScoreHit } = scoreMatchBreakdown(
         prediction,
-        match,
-        finishedIds.has(match.id),
+        effectiveScore(match),
+        finishedIds.has(match.id) || live,
         scoringConfig.match_outcome_points,
         scoringConfig.phase_multipliers[match.phase]
       );
@@ -189,14 +193,18 @@ async function computeStandings() {
   const matchSections = [...scorableMatches]
     .sort((a, b) => kickoffDate(b) - kickoffDate(a))
     .map((match) => {
-      const finishedTag =
+      const live = isMatchLive(match);
+      const scoreTag =
         match.real_score_a != null && match.real_score_b != null
           ? ` · Final ${match.real_score_a}–${match.real_score_b}`
-          : "";
+          : live
+            ? ` · Live ${match.live_score_a}–${match.live_score_b}`
+            : "";
+      const liveBadge = live ? ` <span class="live-badge">🔴 Live</span>` : "";
       return {
         title: `
-          <span class="summary-title">${PHASE_TAGS[match.phase] ?? match.phase} · ${teamFlagImg(match.team_a_crest_url)} ${match.team_a ?? "?"} vs ${teamFlagImg(match.team_b_crest_url)} ${match.team_b ?? "?"}</span>
-          <span class="summary-sub">${formatKickoff(match)}${finishedTag}</span>
+          <span class="summary-title">${PHASE_TAGS[match.phase] ?? match.phase} · ${teamFlagImg(match.team_a_crest_url)} ${match.team_a ?? "?"} vs ${teamFlagImg(match.team_b_crest_url)} ${match.team_b ?? "?"}${liveBadge}</span>
+          <span class="summary-sub">${formatKickoff(match)}${scoreTag}</span>
         `,
         entries: rows.map((row) => {
           const breakdown = row.matchBreakdown.find((b) => b.match.id === match.id);
@@ -230,21 +238,25 @@ async function computeStandings() {
     specialRevealed,
     championDecided: Boolean(champion),
     topScorerKnown: Boolean(topScorer),
+    anyMatchLive,
     matchSections,
     specialSections,
     totalScorableMatches: scorableMatches.length,
   };
 }
 
-function pendingNote({ specialRevealed, championDecided, topScorerKnown }) {
+function pendingNote({ specialRevealed, championDecided, topScorerKnown, anyMatchLive }) {
+  const notes = [];
+  if (anyMatchLive) notes.push("Provisional standings — a match is in progress.");
   if (!specialRevealed) {
-    return "Champion and top scorer picks are still hidden — they'll count once the pick deadline passes.";
+    notes.push("Champion and top scorer picks are still hidden — they'll count once the pick deadline passes.");
+  } else {
+    const missing = [];
+    if (!championDecided) missing.push("the champion hasn't been decided yet");
+    if (!topScorerKnown) missing.push("the tournament top scorer hasn't been set yet");
+    if (missing.length) notes.push(`Match points only for now — ${missing.join(" and ")}.`);
   }
-  const missing = [];
-  if (!championDecided) missing.push("the champion hasn't been decided yet");
-  if (!topScorerKnown) missing.push("the tournament top scorer hasn't been set yet");
-  if (!missing.length) return null;
-  return `Match points only for now — ${missing.join(" and ")}.`;
+  return notes.length ? notes.join(" ") : null;
 }
 
 function formatDelta(value) {

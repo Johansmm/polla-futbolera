@@ -799,6 +799,18 @@ td.num {
   font-weight: 700;
 }
 
+.live-badge {
+  display: inline-block;
+  padding: 0 0.4em;
+  border-radius: 999px;
+  background: var(--danger-tint);
+  color: var(--danger-text);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
 .summary-sub {
   display: block;
   font-size: 0.8rem;
