@@ -76,11 +76,15 @@ function buildResultFields(apiMatch) {
   // score.fullTime is regularTime + extraTime + penalties combined (per
   // football-data.org's v4 docs), so a shootout's goals would otherwise leak
   // into the stored result. This pool's real_score_a/b should reflect the
-  // score through extra time only, excluding the shootout.
-  const { regularTime, extraTime } = apiMatch.score;
+  // score through extra time only, excluding the shootout. The API omits
+  // regularTime entirely for a match decided in regular time (duration
+  // REGULAR) since it'd just duplicate fullTime — fullTime is the regular-time
+  // score in that case, so it's the fallback rather than a second source.
+  const { regularTime, extraTime, fullTime } = apiMatch.score;
+  const base = regularTime ?? fullTime;
   return {
-    real_score_a: regularTime.home + (extraTime?.home ?? 0),
-    real_score_b: regularTime.away + (extraTime?.away ?? 0),
+    real_score_a: base.home + (extraTime?.home ?? 0),
+    real_score_b: base.away + (extraTime?.away ?? 0),
   };
 }
 

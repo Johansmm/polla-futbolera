@@ -28,10 +28,13 @@ test("buildResultFields is empty until the match is finished", () => {
   assert.deepEqual(buildResultFields({ status: "PAUSED" }), {});
 });
 
-test("buildResultFields extracts the regular-time score once finished", () => {
+// football-data.org omits `regularTime` entirely for a match decided in
+// regular time — it'd just duplicate `fullTime` — so this is the real shape
+// returned for the vast majority of finished matches, not an edge case.
+test("buildResultFields falls back to fullTime when regularTime is absent (regular-time finish)", () => {
   const apiMatch = {
     status: "FINISHED",
-    score: { duration: "REGULAR", fullTime: { home: 2, away: 1 }, regularTime: { home: 2, away: 1 } },
+    score: { duration: "REGULAR", fullTime: { home: 2, away: 1 }, halfTime: { home: 1, away: 0 } },
   };
   assert.deepEqual(buildResultFields(apiMatch), { real_score_a: 2, real_score_b: 1 });
 });
