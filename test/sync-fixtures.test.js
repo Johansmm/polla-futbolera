@@ -28,9 +28,40 @@ test("buildResultFields is empty until the match is finished", () => {
   assert.deepEqual(buildResultFields({ status: "PAUSED" }), {});
 });
 
-test("buildResultFields extracts the full-time score once finished", () => {
-  const apiMatch = { status: "FINISHED", score: { fullTime: { home: 2, away: 1 } } };
+test("buildResultFields extracts the regular-time score once finished", () => {
+  const apiMatch = {
+    status: "FINISHED",
+    score: { duration: "REGULAR", fullTime: { home: 2, away: 1 }, regularTime: { home: 2, away: 1 } },
+  };
   assert.deepEqual(buildResultFields(apiMatch), { real_score_a: 2, real_score_b: 1 });
+});
+
+test("buildResultFields adds extra-time goals for a match decided in extra time", () => {
+  const apiMatch = {
+    status: "FINISHED",
+    score: {
+      duration: "EXTRA_TIME",
+      fullTime: { home: 3, away: 2 },
+      regularTime: { home: 2, away: 2 },
+      extraTime: { home: 1, away: 0 },
+    },
+  };
+  assert.deepEqual(buildResultFields(apiMatch), { real_score_a: 3, real_score_b: 2 });
+});
+
+test("buildResultFields excludes penalty-shootout goals from the stored result", () => {
+  // football-data.org's own example: regularTime 1-1, extraTime 0-0, penalties 6-5 -> fullTime 7-6.
+  const apiMatch = {
+    status: "FINISHED",
+    score: {
+      duration: "PENALTY_SHOOTOUT",
+      fullTime: { home: 7, away: 6 },
+      regularTime: { home: 1, away: 1 },
+      extraTime: { home: 0, away: 0 },
+      penalties: { home: 6, away: 5 },
+    },
+  };
+  assert.deepEqual(buildResultFields(apiMatch), { real_score_a: 1, real_score_b: 1 });
 });
 
 test("buildFixturePatch maps stage, kickoff date, both team names, and both crest URLs", () => {

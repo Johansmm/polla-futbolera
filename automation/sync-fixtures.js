@@ -73,9 +73,14 @@ function resolvePhase(stage) {
 
 function buildResultFields(apiMatch) {
   if (apiMatch.status !== "FINISHED") return {};
+  // score.fullTime is regularTime + extraTime + penalties combined (per
+  // football-data.org's v4 docs), so a shootout's goals would otherwise leak
+  // into the stored result. This pool's real_score_a/b should reflect the
+  // score through extra time only, excluding the shootout.
+  const { regularTime, extraTime } = apiMatch.score;
   return {
-    real_score_a: apiMatch.score.fullTime.home,
-    real_score_b: apiMatch.score.fullTime.away,
+    real_score_a: regularTime.home + (extraTime?.home ?? 0),
+    real_score_b: regularTime.away + (extraTime?.away ?? 0),
   };
 }
 
