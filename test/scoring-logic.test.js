@@ -11,6 +11,8 @@ let calculateTopScorerPoints;
 let finishedMatches;
 let deriveChampion;
 let deriveSemifinalists;
+let isMatchLive;
+let effectiveScore;
 
 test.before(async () => {
   ({
@@ -21,6 +23,8 @@ test.before(async () => {
     finishedMatches,
     deriveChampion,
     deriveSemifinalists,
+    isMatchLive,
+    effectiveScore,
   } = await import("../js/scoring-logic.mjs"));
 });
 
@@ -211,6 +215,31 @@ test("finishedMatches keeps only matches with both real scores set", () => {
     finishedMatches(matches).map((m) => m.match_id),
     ["r16_01"]
   );
+});
+
+test("isMatchLive is true once a live score is set and the real score isn't", () => {
+  assert.equal(isMatchLive({ live_score_a: 1, live_score_b: 0, real_score_a: null, real_score_b: null }), true);
+});
+
+test("isMatchLive is false before kickoff, with neither score set", () => {
+  assert.equal(isMatchLive({ live_score_a: null, live_score_b: null, real_score_a: null, real_score_b: null }), false);
+});
+
+test("isMatchLive is false once the real score is set, even if a live score lingers", () => {
+  assert.equal(isMatchLive({ live_score_a: 1, live_score_b: 0, real_score_a: 1, real_score_b: 0 }), false);
+});
+
+test("effectiveScore substitutes the live score for real_score_a/b while live", () => {
+  const match = { team_a: "Argentina", team_b: "France", live_score_a: 1, live_score_b: 0, real_score_a: null, real_score_b: null };
+  assert.deepEqual(effectiveScore(match), { ...match, real_score_a: 1, real_score_b: 0 });
+});
+
+test("effectiveScore passes the match through unchanged once finished or before kickoff", () => {
+  const finished = { real_score_a: 2, real_score_b: 1, live_score_a: null, live_score_b: null };
+  assert.deepEqual(effectiveScore(finished), finished);
+
+  const notStarted = { real_score_a: null, real_score_b: null, live_score_a: null, live_score_b: null };
+  assert.deepEqual(effectiveScore(notStarted), notStarted);
 });
 
 test("deriveChampion returns no champion when the final hasn't been played yet", () => {
