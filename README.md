@@ -1,4 +1,4 @@
-# Poya — World Cup 2026 Prediction Pool
+# Polla — World Cup 2026 Prediction Pool
 
 Static site (no build step) + Firebase Firestore, for a private group predicting
 match scores from the Round of 16 onward. See `CLAUDE.md` for full project context.

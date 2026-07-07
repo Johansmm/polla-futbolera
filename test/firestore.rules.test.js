@@ -14,7 +14,7 @@ let testEnv;
 
 test.before(async () => {
   testEnv = await initializeTestEnvironment({
-    projectId: "poya-rules-test",
+    projectId: "polla-rules-test",
     firestore: {
       rules: fs.readFileSync(path.join(__dirname, "..", "firestore.rules"), "utf8"),
       host: "127.0.0.1",
