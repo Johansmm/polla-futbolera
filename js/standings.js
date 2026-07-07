@@ -201,18 +201,32 @@ async function computeStandings() {
             ? ` · Live ${match.live_score_a}–${match.live_score_b}`
             : "";
       const liveBadge = live ? ` <span class="live-badge">🔴 Live</span>` : "";
+
+      const rawEntries = rows.map((row) => {
+        const breakdown = row.matchBreakdown.find((b) => b.match.id === match.id);
+        const prediction = breakdown?.prediction
+          ? `${breakdown.prediction.predicted_score_a}–${breakdown.prediction.predicted_score_b}`
+          : "—";
+        return { name: row.name, prediction, points: breakdown?.points ?? null };
+      });
+      // Highest points for this specific match, not the overall standings —
+      // ties share the crown, same as .leader-row in the general table.
+      const maxPoints = rawEntries.reduce((max, e) => (e.points != null && e.points > max ? e.points : max), -Infinity);
+      const entries = rawEntries
+        .map((e) => ({ ...e, top: e.points != null && e.points === maxPoints }))
+        .sort((a, b) => {
+          if (a.points == null && b.points == null) return a.name.localeCompare(b.name);
+          if (a.points == null) return 1;
+          if (b.points == null) return -1;
+          return b.points - a.points || a.name.localeCompare(b.name);
+        });
+
       return {
         title: `
           <span class="summary-title">${PHASE_TAGS[match.phase] ?? match.phase} · ${teamFlagImg(match.team_a_crest_url)} ${match.team_a ?? "?"} vs ${teamFlagImg(match.team_b_crest_url)} ${match.team_b ?? "?"}${liveBadge}</span>
           <span class="summary-sub">${formatKickoff(match)}${scoreTag}</span>
         `,
-        entries: rows.map((row) => {
-          const breakdown = row.matchBreakdown.find((b) => b.match.id === match.id);
-          const prediction = breakdown?.prediction
-            ? `${breakdown.prediction.predicted_score_a}–${breakdown.prediction.predicted_score_b}`
-            : "—";
-          return { name: row.name, prediction, points: breakdown?.points ?? null };
-        }),
+        entries,
       };
     });
 
@@ -348,8 +362,9 @@ function renderSection({ title, entries }) {
   table.innerHTML = '<thead><tr><th>Name</th><th>Prediction</th><th class="num">Points</th></tr></thead>';
 
   const tbody = document.createElement("tbody");
-  entries.forEach(({ name, prediction, points }) => {
+  entries.forEach(({ name, prediction, points, top }) => {
     const tr = document.createElement("tr");
+    if (top) tr.classList.add("match-leader-row");
     const pointsCell = td("num");
     if (points === null) {
       const pending = document.createElement("em");
