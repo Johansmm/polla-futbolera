@@ -1,7 +1,7 @@
 // Scheduled fixture/results sync, run by two independent jobs in
 // .github/workflows/sync-fixtures.yml: full-sync (every 3h, unconditional —
 // discovers newly-defined matches and team names as the bracket resolves)
-// and fast-sync (every 15 min, but only calls the API when
+// and fast-sync (every 5 min, but only calls the API when
 // --only-if-pending sees a match awaiting a result — see hasPendingResult
 // below). Both run the exact same sync: fetch ALL World Cup 2026 matches
 // from football-data.org and write fixture/result updates to Firestore, so
@@ -166,7 +166,7 @@ module.exports = {
 if (require.main === module) {
   const FOOTBALL_DATA_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
   const FIREBASE_SERVICE_ACCOUNT_JSON = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  // Passed by sync-fixtures.yml's fast-sync job (every 15 min): skip the
+  // Passed by sync-fixtures.yml's fast-sync job (every 5 min): skip the
   // football-data.org call entirely unless some match is actually awaiting
   // a result, so the frequent schedule stays cheap. full-sync (every 3h)
   // never passes this — it's the one job that still has to poll blindly,

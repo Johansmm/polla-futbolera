@@ -144,7 +144,7 @@ everything still works via `admin/seed.js` + the Firebase console without it.
   the bracket resolves — there's no local state to check before calling the
   API for that, so it always polls, but it's a single bulk request per run
   regardless of how many matches exist, so a 3-hourly cadence is cheap.
-- `fast-sync` runs every 15 minutes, but calls `sync-fixtures.js
+- `fast-sync` runs every 5 minutes, but calls `sync-fixtures.js
   --only-if-pending`, which first checks Firestore for any match whose
   `kickoff_at` has already passed with no `real_score_a` set yet
   (`hasPendingResult`) and skips the football-data.org call entirely if
@@ -326,7 +326,7 @@ test/lock-logic.test.js        unit tests for js/lock-logic.mjs (no emulator nee
 test/scoring-logic.test.js     unit tests for js/scoring-logic.mjs (no emulator needed)
 .github/workflows/ci.yml               runs the test suite on every PR / push to main
 automation/sync-fixtures.js            optional: auto-syncs fixtures/results from football-data.org
-.github/workflows/sync-fixtures.yml    runs it via 2 jobs: every 3h (unconditional) + every 15min (if pending)
+.github/workflows/sync-fixtures.yml    runs it via 2 jobs: every 3h (unconditional) + every 5min (if pending)
 automation/missing-predictions.js          reports who's missing a pick for matches in the next 24h
 .github/workflows/missing-predictions.yml  runs automation/missing-predictions.js on demand only
 ```
