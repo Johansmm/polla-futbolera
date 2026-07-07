@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   resolvePhase,
   buildResultFields,
+  buildLiveScoreFields,
   buildFixturePatch,
   findMatchingDoc,
   generateMatchId,
@@ -28,10 +29,13 @@ test("buildResultFields is empty until the match is finished", () => {
   assert.deepEqual(buildResultFields({ status: "PAUSED" }), {});
 });
 
-test("buildResultFields extracts the regular-time score once finished", () => {
+// football-data.org omits `regularTime` entirely for a match decided in
+// regular time — it'd just duplicate `fullTime` — so this is the real shape
+// returned for the vast majority of finished matches, not an edge case.
+test("buildResultFields falls back to fullTime when regularTime is absent (regular-time finish)", () => {
   const apiMatch = {
     status: "FINISHED",
-    score: { duration: "REGULAR", fullTime: { home: 2, away: 1 }, regularTime: { home: 2, away: 1 } },
+    score: { duration: "REGULAR", fullTime: { home: 2, away: 1 }, halfTime: { home: 1, away: 0 } },
   };
   assert.deepEqual(buildResultFields(apiMatch), { real_score_a: 2, real_score_b: 1 });
 });
@@ -62,6 +66,24 @@ test("buildResultFields excludes penalty-shootout goals from the stored result",
     },
   };
   assert.deepEqual(buildResultFields(apiMatch), { real_score_a: 1, real_score_b: 1 });
+});
+
+test("buildLiveScoreFields is empty before kickoff", () => {
+  assert.deepEqual(buildLiveScoreFields({ status: "SCHEDULED" }), {});
+  assert.deepEqual(buildLiveScoreFields({ status: "TIMED" }), {});
+});
+
+test("buildLiveScoreFields extracts the running score while in play or paused", () => {
+  const inPlay = { status: "IN_PLAY", score: { fullTime: { home: 1, away: 0 } } };
+  assert.deepEqual(buildLiveScoreFields(inPlay), { live_score_a: 1, live_score_b: 0 });
+
+  const paused = { status: "PAUSED", score: { fullTime: { home: 0, away: 0 } } };
+  assert.deepEqual(buildLiveScoreFields(paused), { live_score_a: 0, live_score_b: 0 });
+});
+
+test("buildLiveScoreFields clears the live score once the match is finished", () => {
+  const apiMatch = { status: "FINISHED", score: { fullTime: { home: 2, away: 1 } } };
+  assert.deepEqual(buildLiveScoreFields(apiMatch), { live_score_a: null, live_score_b: null });
 });
 
 test("buildFixturePatch maps stage, kickoff date, both team names, and both crest URLs", () => {

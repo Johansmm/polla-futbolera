@@ -90,6 +90,19 @@ export function calculateTopScorerPoints(
   return points;
 }
 
+// A match is "live" once sync-fixtures.js has a running score for it but no
+// admin-entered final result yet — real_score_a/b always win once set.
+export function isMatchLive(match) {
+  return match.live_score_a != null && match.real_score_a == null;
+}
+
+// Swaps in the live score as a stand-in for real_score_a/b so the existing
+// scoreMatch()/scoreMatchBreakdown() need no changes to compute provisional
+// points. A no-op once real_score_a is set, or before the match has started.
+export function effectiveScore(match) {
+  return isMatchLive(match) ? { ...match, real_score_a: match.live_score_a, real_score_b: match.live_score_b } : match;
+}
+
 // Only matches with an admin-entered result count toward scoring — that's
 // also always past that match's own deadline, so their predictions are
 // guaranteed to be publicly readable by the time this runs.

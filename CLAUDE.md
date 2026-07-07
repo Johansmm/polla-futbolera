@@ -74,6 +74,7 @@ Explicitly deprioritized for now (build later, don't block on this):
 | `team_a_crest_url` / `team_b_crest_url` | string\|null | Flag/crest image URL, synced from the same source as `team_a`/`team_b` — display-only, never derived or looked up client-side |
 | `kickoff_at` | timestamp | Used to auto-lock predictions |
 | `real_score_a` / `real_score_b` | number\|null | Filled by admin after the match |
+| `live_score_a` / `live_score_b` | number\|null | Written by `sync-fixtures.js` while the match is `IN_PLAY`/`PAUSED`, cleared to `null` once `real_score_a`/`real_score_b` are set at `FINISHED`. Never authoritative — `real_score_a`/`real_score_b` win once set |
 | `locked` | boolean | Auto-true after kickoff |
 
 ### `predictions`
@@ -204,7 +205,11 @@ derived data that can go stale relative to the raw predictions. Champion/
 finalists/semifinalists are derived from the `final`/`sf` matches' real
 scores at read time; the tournament top scorer/top-3 aren't tracked
 anywhere else in Firestore, so an admin sets those once in
-`config/tournament_results` when known.
+`config/tournament_results` when known. While a match is in progress (a
+`live_score_a`/`live_score_b` is set but `real_score_a`/`real_score_b`
+aren't yet), the standings page shows provisional points sourced from the
+live score instead, via `scoring-logic.mjs`'s `isMatchLive`/`effectiveScore`
+— never stored, and superseded the moment the real score is set.
 
 ## Explicitly rejected approaches (context for why, so we don't re-litigate)
 

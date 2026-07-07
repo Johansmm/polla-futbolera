@@ -673,6 +673,13 @@ td.num {
   content: "🏆 ";
 }
 
+/* Same gold tint as .leader-row, no crown — this marks the top scorer(s) of
+ * one specific match in the breakdown, not the overall standings leader. */
+.match-leader-row td {
+  background: var(--gold-tint);
+  font-weight: 650;
+}
+
 .delta-positive {
   color: var(--up);
   font-weight: 650;
@@ -797,6 +804,18 @@ td.num {
 .summary-title {
   display: block;
   font-weight: 700;
+}
+
+.live-badge {
+  display: inline-block;
+  padding: 0 0.4em;
+  border-radius: 999px;
+  background: var(--danger-tint);
+  color: var(--danger-text);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
 }
 
 .summary-sub {
