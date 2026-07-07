@@ -1,4 +1,4 @@
-# World Cup 2026 Prediction Pool ("Poya") — Project Context
+# World Cup 2026 Prediction Pool ("Polla") — Project Context
 
 ## Goal
 

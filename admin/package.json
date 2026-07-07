@@ -1,8 +1,8 @@
 {
-  "name": "poya-admin",
+  "name": "polla-admin",
   "private": true,
   "version": "1.0.0",
-  "description": "Local admin tooling for the Poya Mundial 2026 prediction pool. Not deployed to GitHub Pages logic-wise — run locally only.",
+  "description": "Local admin tooling for the Polla Mundial 2026 prediction pool. Not deployed to GitHub Pages logic-wise — run locally only.",
   "type": "commonjs",
   "scripts": {
     "seed": "node seed.js"

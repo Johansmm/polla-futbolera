@@ -1,8 +1,8 @@
 {
-  "name": "poya-tests",
+  "name": "polla-tests",
   "private": true,
   "version": "1.0.0",
-  "description": "Test tooling for the Poya prediction pool — Firestore security rules tests, run against the local emulator. Not part of the deployed static site.",
+  "description": "Test tooling for the Polla prediction pool — Firestore security rules tests, run against the local emulator. Not part of the deployed static site.",
   "type": "commonjs",
   "scripts": {
     "test": "firebase emulators:exec --only firestore \"node --test test/\""

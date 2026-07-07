@@ -1,5 +1,5 @@
 {
-  "name": "poya-fixture-sync",
+  "name": "polla-fixture-sync",
   "private": true,
   "version": "1.0.0",
   "description": "Scheduled World Cup 2026 fixture/results sync into Firestore. Runs via GitHub Actions on a cron — not intended to be run locally, though it can be for testing.",
