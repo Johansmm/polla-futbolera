@@ -4,11 +4,23 @@
 // drop ?token= and dump the user on the missing-link error.
 import { getTokenFromUrl } from "./token-gate.js";
 
+export const REPO_URL = "https://github.com/Johansmm/polla-futbolera";
+
 const PAGES = [
   { file: "predict.html", label: "My predictions" },
   { file: "special.html", label: "Champion & top scorer" },
   { file: "standings.html", label: "Standings" },
 ];
+
+const footer = document.getElementById("site-footer");
+if (footer) {
+  const link = document.createElement("a");
+  link.href = `${REPO_URL}/issues/new`;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = "Report an issue";
+  footer.appendChild(link);
+}
 
 const nav = document.getElementById("site-nav");
 if (nav) {
