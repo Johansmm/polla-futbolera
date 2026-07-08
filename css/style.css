@@ -217,6 +217,24 @@ a.nav-chip:active {
   background: var(--accent-tint);
 }
 
+.repo-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-pill);
+  color: var(--ink-faint);
+  transition: color var(--dur) var(--ease);
+}
+
+.repo-badge:hover {
+  color: var(--ink);
+}
+
 .nav-chip.is-current {
   background: var(--accent);
   border-color: var(--accent);
