@@ -16,6 +16,10 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 
+# Wrangler (Cloudflare Worker) local state / local-only secrets
+worker/.wrangler/
+worker/.dev.vars
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

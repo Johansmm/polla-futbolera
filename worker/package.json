@@ -1,0 +1,14 @@
+{
+  "name": "polla-match-proxy",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Cloudflare Worker proxying football-data.org for match data, with a KV cache shared across all users. Not intended to run inside the root Firestore-rules test suite.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.107.1"
+  }
+}
