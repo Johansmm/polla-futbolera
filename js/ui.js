@@ -34,13 +34,14 @@ export function showSignedInName(name) {
   el.hidden = false;
 }
 
-// crestUrl comes straight from matches.team_a_crest_url/team_b_crest_url,
-// synced by automation/sync-fixtures.js from football-data.org — there's no
-// team-name-to-flag lookup of our own to keep in sync. Renders nothing (not
-// a broken-image icon) for a team with no crest synced yet. The team name is
-// always adjacent text, so the flag is decorative: alt="" keeps screen
-// readers from announcing every team twice, and the explicit width/height
-// reserve the box before the image loads so rows don't shift.
+// crestUrl comes from team_a_crest_url/team_b_crest_url, merged in at read
+// time by js/worker-matches.mjs from the Worker's football-data.org
+// response — there's no team-name-to-flag lookup of our own to keep in
+// sync. Renders nothing (not a broken-image icon) for a team with no crest
+// resolved yet. The team name is always adjacent text, so the flag is
+// decorative: alt="" keeps screen readers from announcing every team
+// twice, and the explicit width/height reserve the box before the image
+// loads so rows don't shift.
 export function teamFlagImg(crestUrl) {
   if (!crestUrl) return "";
   return `<img class="team-flag" src="${crestUrl}" alt="" width="20" height="14" loading="lazy" />`;

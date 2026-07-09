@@ -8,8 +8,8 @@
 //   API_KEY     — secret, football-data.org API token (`wrangler secret put API_KEY`)
 //
 // The competition code ("WC" = FIFA World Cup) matches
-// automation/sync-fixtures.js's COMPETITION_CODE — verify it against
-// football-data.org's current docs if the tournament format changes.
+// admin/seed.js's COMPETITION_CODE — verify it against football-data.org's
+// current docs if the tournament format changes.
 const COMPETITION_CODE = "WC";
 
 // One upstream endpoint per route exposed to the client, plus this cache's

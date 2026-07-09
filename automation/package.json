@@ -1,12 +1,9 @@
 {
-  "name": "polla-fixture-sync",
+  "name": "polla-automation",
   "private": true,
   "version": "1.0.0",
-  "description": "Scheduled World Cup 2026 fixture/results sync into Firestore. Runs via GitHub Actions on a cron — not intended to be run locally, though it can be for testing.",
+  "description": "Admin-triggered scripts that need Firebase Admin SDK access, run via GitHub Actions (workflow_dispatch) — not intended to be run locally, though it can be for testing.",
   "type": "commonjs",
-  "scripts": {
-    "sync": "node sync-fixtures.js"
-  },
   "dependencies": {
     "firebase-admin": "12.7.0"
   }
