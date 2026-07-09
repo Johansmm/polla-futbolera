@@ -10,14 +10,34 @@ import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
 import { showStatus, showRetry, showSignedInName } from "./ui.js";
 import { isPastDeadline } from "./lock-logic.mjs";
-import { fetchSpecialPredictionsDeadline, fetchTeamRosters, fetchUserName, fetchMatches } from "./queries.js";
-import { selectScorableMatches, computeStandingsFromData } from "./standings-logic.mjs";
+import {
+  fetchSpecialPredictionsDeadline,
+  fetchTeamRosters,
+  fetchUserName,
+  fetchFirestoreMatches,
+  fetchWorkerMatches,
+} from "./queries.js";
+import { mergeMatchData } from "./worker-matches.mjs";
+import {
+  selectScorableMatches,
+  selectNewlyScorableMatches,
+  hasMatchNeedingRefresh,
+  computeStandingsFromData,
+} from "./standings-logic.mjs";
 
 const statusEl = document.getElementById("status");
 const noteEl = document.getElementById("standings-note");
 const tableEl = document.getElementById("standings-table");
 const sectionsEl = document.getElementById("breakdown-sections");
 const columnsHelpEl = document.getElementById("columns-help");
+
+// Display-freshness only, not an API-consumption concern — the Worker's
+// /matches route is shared-KV-cached for 60s (see README's "Cloudflare
+// Worker match proxy"), so polling faster than that cache's own TTL just
+// re-reads the same cached response most of the time anyway. Kept snappy
+// (10s) since a live match is exactly when someone has the page open
+// watching it update.
+const POLL_INTERVAL_MS = 10_000;
 
 async function fetchScoringConfig() {
   const res = await fetch("scoring_config.json");
@@ -50,16 +70,32 @@ async function fetchTournamentResults() {
   return snap.exists() ? snap.data() : null;
 }
 
-async function computeStandings() {
-  const [scoringConfig, users, matches, rosters, specialDeadline, tournamentResults] = await Promise.all([
-    fetchScoringConfig(),
-    fetchUsers(),
-    fetchMatches(),
-    fetchTeamRosters(),
-    fetchSpecialPredictionsDeadline(),
-    fetchTournamentResults(),
-  ]);
+// Only ever combines the Firestore skeleton (fetched once) with a fresh
+// fetchWorkerMatches() call, never re-reading Firestore's matches
+// collection — that's the whole point of state.firestoreMatches living in
+// memory across poll ticks instead of being re-fetched.
+function mergeWorkerMatches(firestoreMatches, workerMatches) {
+  const workerMatchesById = new Map(workerMatches.map((m) => [m.id, m]));
+  return firestoreMatches.map((match) => mergeMatchData(match, workerMatchesById));
+}
 
+// Everything that's fetched once on load and kept in memory for the poll
+// loop to reuse, per the issue's "static inputs" list — nothing here changes
+// often enough (or, for firestoreMatches, is even allowed by firestore.rules
+// to be cheaply re-read) to justify a Firestore round-trip on every tick.
+async function loadStaticData() {
+  const [scoringConfig, users, rosters, specialDeadline, tournamentResults, firestoreMatches, workerMatches] =
+    await Promise.all([
+      fetchScoringConfig(),
+      fetchUsers(),
+      fetchTeamRosters(),
+      fetchSpecialPredictionsDeadline(),
+      fetchTournamentResults(),
+      fetchFirestoreMatches(),
+      fetchWorkerMatches(),
+    ]);
+
+  const matches = mergeWorkerMatches(firestoreMatches, workerMatches);
   const scorableMatches = selectScorableMatches(matches, scoringConfig);
   const predictionsByMatch = Object.fromEntries(
     await Promise.all(scorableMatches.map(async (match) => [match.id, await fetchPredictionsByMatch(match.id)]))
@@ -67,20 +103,66 @@ async function computeStandings() {
 
   // false when unset: an unconfigured deadline must read as "not revealed"
   // here, or Firestore denies the special_predictions list query outright
-  // (see firestore.rules' specialPredictionsDeadlinePassed(false)).
+  // (see firestore.rules' specialPredictionsDeadlinePassed(false)). Special
+  // picks are only ever set once at tournament start (see CLAUDE.md), so
+  // unlike matches/predictions this never needs a poll-time refresh.
   const specialRevealed = isPastDeadline(specialDeadline, false);
   const specialPicks = specialRevealed ? await fetchSpecialPredictions() : {};
 
-  return computeStandingsFromData({
+  return {
     scoringConfig,
     users,
-    matches,
     rosters,
     tournamentResults,
-    predictionsByMatch,
-    specialPicks,
     specialRevealed,
+    specialPicks,
+    firestoreMatches,
+    matches,
+    predictionsByMatch,
+    fetchedPredictionIds: new Set(scorableMatches.map((m) => m.id)),
+  };
+}
+
+function computeStandings(state) {
+  return computeStandingsFromData({
+    scoringConfig: state.scoringConfig,
+    users: state.users,
+    matches: state.matches,
+    rosters: state.rosters,
+    tournamentResults: state.tournamentResults,
+    predictionsByMatch: state.predictionsByMatch,
+    specialPicks: state.specialPicks,
+    specialRevealed: state.specialRevealed,
   });
+}
+
+// One poll tick: skip entirely (no network calls at all) unless some match
+// could plausibly have changed since the last tick — see
+// hasMatchNeedingRefresh's doc comment. Mutates state in place so setInterval
+// can just keep calling this with the same object.
+async function refreshState(state) {
+  if (!hasMatchNeedingRefresh(state.matches)) return false;
+
+  const workerMatches = await fetchWorkerMatches();
+  // An empty result means the Worker call itself failed (see
+  // fetchWorkerMatches' doc comment) — keep the last-known-good merged
+  // matches rather than overwriting real data with a blank skeleton.
+  if (workerMatches.length) {
+    state.matches = mergeWorkerMatches(state.firestoreMatches, workerMatches);
+  }
+
+  const newlyLocked = selectNewlyScorableMatches(state.matches, state.scoringConfig, state.fetchedPredictionIds);
+  if (newlyLocked.length) {
+    const entries = await Promise.all(
+      newlyLocked.map(async (match) => [match.id, await fetchPredictionsByMatch(match.id)])
+    );
+    for (const [matchId, predictions] of entries) {
+      state.predictionsByMatch[matchId] = predictions;
+      state.fetchedPredictionIds.add(matchId);
+    }
+  }
+
+  return true;
 }
 
 function pendingNote({ specialRevealed, championDecided, topScorerKnown, anyMatchLive }) {
@@ -234,24 +316,12 @@ function renderSections(specialSections, matchSections) {
   sectionsEl.hidden = false;
 }
 
-async function main() {
-  const userId = await resolveUserFromToken(statusEl);
-  if (!userId) return;
-
-  showStatus(statusEl, "Loading standings…");
-  fetchUserName(userId)
-    .then(showSignedInName)
-    .catch(() => {});
-
-  let result;
-  try {
-    result = await computeStandings();
-  } catch (err) {
-    console.error(err);
-    showRetry(statusEl, "Couldn't load the standings.", () => window.location.reload());
-    return;
-  }
-
+// Handles every possible computeStandings() outcome, including the two
+// "nothing to show yet" cases — kept reachable from every poll tick (not
+// just the initial load) so a page opened before the first kickoff
+// transitions straight to the real table the moment that match locks,
+// without needing a reload.
+function renderResult(result, viewerId) {
   if (!result.rows.length) {
     showStatus(statusEl, "No players registered yet — ask the organizer.");
     return;
@@ -265,13 +335,56 @@ async function main() {
   statusEl.hidden = true;
 
   const note = pendingNote(result);
-  if (note) {
-    noteEl.textContent = note;
-    noteEl.hidden = false;
+  noteEl.hidden = !note;
+  if (note) noteEl.textContent = note;
+
+  renderTable(result.rows, result.totalScorableMatches, viewerId);
+  renderSections(result.specialSections, result.matchSections);
+}
+
+// result is plain, JSON-serializable data (scoring-logic.mjs's outputs are
+// numbers/strings/booleans/plain objects throughout) — serializing it is a
+// cheap way to skip a render when a poll tick's refresh didn't actually
+// change anything, e.g. a live match's score hasn't moved since last tick.
+function renderIfChanged(state, result, viewerId) {
+  const key = JSON.stringify(result);
+  if (key === state.lastRenderKey) return;
+  state.lastRenderKey = key;
+  renderResult(result, viewerId);
+}
+
+function startPolling(state, viewerId) {
+  setInterval(() => {
+    refreshState(state)
+      .then((refreshed) => {
+        if (!refreshed) return;
+        renderIfChanged(state, computeStandings(state), viewerId);
+      })
+      .catch((err) => console.error("standings poll failed", err));
+  }, POLL_INTERVAL_MS);
+}
+
+async function main() {
+  const userId = await resolveUserFromToken(statusEl);
+  if (!userId) return;
+
+  showStatus(statusEl, "Loading standings…");
+  fetchUserName(userId)
+    .then(showSignedInName)
+    .catch(() => {});
+
+  let state;
+  try {
+    state = await loadStaticData();
+  } catch (err) {
+    console.error(err);
+    showRetry(statusEl, "Couldn't load the standings.", () => window.location.reload());
+    return;
   }
 
-  renderTable(result.rows, result.totalScorableMatches, userId);
-  renderSections(result.specialSections, result.matchSections);
+  state.lastRenderKey = null;
+  renderIfChanged(state, computeStandings(state), userId);
+  startPolling(state, userId);
 }
 
 main();

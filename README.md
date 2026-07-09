@@ -261,6 +261,17 @@ multiply real football-data.org calls:
   score reasonably fresh without approaching the free tier's 10 calls/min
   limit (60s cache ≈ 1 call/min)
 
+`standings.html` polls this route every 10s (`js/standings.js`'s
+`POLL_INTERVAL_MS`) while some match has kicked off without a final result
+yet, so a client with the page already open sees a live score, provisional
+points, and the table update on their own instead of needing a reload. That
+polling only ever touches this cached route, never Firestore's `matches`
+collection again after the initial load — the Firestore skeleton
+(`match_id`/`kickoff_at`/`source_match_id`) is fetched once and re-merged
+client-side with each fresh `/matches` response. `predictions` for a match
+that newly crosses into "locked" while the page is open are fetched once,
+the moment that happens, not on every tick.
+
 One-time setup (Cloudflare account, KV namespace, secret, deploy) is step 2
 of "Setup (one-time)" above.
 

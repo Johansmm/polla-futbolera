@@ -38,6 +38,28 @@ export function selectScorableMatches(matches, scoringConfig) {
   return matches.filter((match) => isMatchLocked(match) && scoringConfig.phase_multipliers[match.phase] != null);
 }
 
+// standings.js's poll loop calls this on every tick, cheap and network-free
+// (just comparing already-loaded kickoff_at/real_score_a against Date.now()),
+// to decide whether a Worker refetch could possibly change anything shown.
+// True for a match that has kicked off but has no admin-entered result yet —
+// covers both "about to go live" (still SCHEDULED per last fetch) and
+// "already live" alike, since both need another Worker call to progress.
+// Once every match's real_score_a is set, this goes false for good and the
+// poll loop stops refetching entirely — nothing left that could change.
+export function hasMatchNeedingRefresh(matches) {
+  return matches.some((match) => isMatchLocked(match) && match.real_score_a == null);
+}
+
+// Scorable matches the poll loop hasn't fetched predictions for yet —
+// i.e. matches that crossed into "locked" (kickoff passed) since
+// alreadyFetchedIds was last updated. Each of these needs exactly one
+// predictions fetch, not one per tick: a locked match's predictions never
+// change (see firestore.rules), only their visibility does, and that only
+// flips once.
+export function selectNewlyScorableMatches(matches, scoringConfig, alreadyFetchedIds) {
+  return selectScorableMatches(matches, scoringConfig).filter((match) => !alreadyFetchedIds.has(match.id));
+}
+
 export function computeStandingsFromData({
   scoringConfig,
   users,
