@@ -29,7 +29,6 @@ const USERS = [
 // list to build the matches skeleton, and seedTeamRosters() uses the same
 // token for team/player data. Get a free key from https://www.football-data.org/.
 const FOOTBALL_DATA_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
-const COMPETITION_CODE = "WC"; // FIFA World Cup, per football-data.org's docs
 
 function generateMatchId(phase, takenIds) {
   let n = 1;
@@ -45,8 +44,8 @@ function generateToken() {
   return crypto.randomBytes(16).toString("base64url");
 }
 
-async function fetchFromFootballData(path) {
-  const res = await fetch(`https://api.football-data.org/v4/competitions/${COMPETITION_CODE}/${path}`, {
+async function fetchFromFootballData(path, { baseUrl, competitionCode }) {
+  const res = await fetch(`${baseUrl}/competitions/${competitionCode}/${path}`, {
     headers: { "X-Auth-Token": FOOTBALL_DATA_TOKEN },
   });
 
@@ -75,12 +74,12 @@ async function fetchFromFootballData(path) {
 // re-deriving match_id, so it keeps its original match_id even if the API's
 // response order changes between runs; only a fixture never seeded before
 // gets a newly generated one.
-async function seedMatches(resolvePhase) {
+async function seedMatches(resolvePhase, footballDataConfig) {
   if (!FOOTBALL_DATA_TOKEN) {
     throw new Error("FOOTBALL_DATA_TOKEN is required — get a free key from https://www.football-data.org/");
   }
 
-  const fixtures = (await fetchFromFootballData("matches")).matches.filter((m) => m.utcDate);
+  const fixtures = (await fetchFromFootballData("matches", footballDataConfig)).matches.filter((m) => m.utcDate);
 
   const existingSnap = await db.collection("matches").get();
   const existingIdBySourceId = new Map(existingSnap.docs.map((doc) => [doc.data().source_match_id, doc.id]));
@@ -90,12 +89,11 @@ async function seedMatches(resolvePhase) {
   // order football-data.org happens to return fixtures in.
   const sortedFixtures = [...fixtures].sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
 
-  const takenIdsByPhase = new Map();
-  for (const matchId of existingIdBySourceId.values()) {
-    const phase = matchId.replace(/_\d+$/, "");
-    if (!takenIdsByPhase.has(phase)) takenIdsByPhase.set(phase, new Set());
-    takenIdsByPhase.get(phase).add(matchId);
-  }
+  // generateMatchId only ever tests a full candidate like "r16_01" against
+  // this set, so a single flat set of every existing match_id works just as
+  // well as bucketing by phase — a candidate only ever collides with a
+  // match in the same phase anyway.
+  const takenIds = new Set(existingIdBySourceId.values());
 
   const batch = db.batch();
   const seeded = [];
@@ -109,10 +107,8 @@ async function seedMatches(resolvePhase) {
     if (matchId) {
       updated++;
     } else {
-      const taken = takenIdsByPhase.get(phase) ?? new Set();
-      matchId = generateMatchId(phase, taken);
-      taken.add(matchId);
-      takenIdsByPhase.set(phase, taken);
+      matchId = generateMatchId(phase, takenIds);
+      takenIds.add(matchId);
       created++;
     }
 
@@ -164,8 +160,8 @@ async function seedSpecialPredictionsDeadline(seededMatches, trackedPhases) {
 // every World Cup 2026 team and its squad in a single API call (confirmed
 // against the real API: /v4/competitions/WC/teams returns full squads on
 // the free tier, no per-team requests needed).
-async function seedTeamRosters() {
-  const { teams } = await fetchFromFootballData("teams");
+async function seedTeamRosters(footballDataConfig) {
+  const { teams } = await fetchFromFootballData("teams", footballDataConfig);
   const batch = db.batch();
 
   for (const team of teams) {
@@ -206,16 +202,19 @@ async function seedUsers() {
 }
 
 async function main() {
-  // js/worker-matches.mjs is a real ES module, loaded here via dynamic
-  // import() even though this script itself is CommonJS — same pattern the
-  // test suite uses to load js/*.mjs files. Keeps the stage/phase mapping
-  // in one place instead of a second copy here that could drift from it.
+  // Both are real ES modules, loaded here via dynamic import() even though
+  // this script itself is CommonJS — same pattern the test suite uses to
+  // load js/*.mjs files. Keeps the stage/phase mapping and the
+  // football-data.org connection details in one place each, instead of a
+  // second copy here that could drift from them.
   const { resolvePhase, STAGE_TO_PHASE } = await import("../js/worker-matches.mjs");
+  const { FOOTBALL_DATA_BASE_URL, COMPETITION_CODE } = await import("../js/football-data-config.mjs");
   const trackedPhases = new Set(Object.values(STAGE_TO_PHASE));
+  const footballDataConfig = { baseUrl: FOOTBALL_DATA_BASE_URL, competitionCode: COMPETITION_CODE };
 
-  const seededMatches = await seedMatches(resolvePhase);
+  const seededMatches = await seedMatches(resolvePhase, footballDataConfig);
   await seedSpecialPredictionsDeadline(seededMatches, trackedPhases);
-  await seedTeamRosters();
+  await seedTeamRosters(footballDataConfig);
   await seedUsers();
   console.log("\nDone. Save the printed links now — tokens aren't printed again unless you add a brand-new user.");
 }

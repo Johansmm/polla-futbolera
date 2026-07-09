@@ -6,11 +6,7 @@
 // Bindings expected (see wrangler.toml):
 //   MATCH_CACHE — KV namespace used as the cache (`wrangler kv namespace create`)
 //   API_KEY     — secret, football-data.org API token (`wrangler secret put API_KEY`)
-//
-// The competition code ("WC" = FIFA World Cup) matches
-// admin/seed.js's COMPETITION_CODE — verify it against football-data.org's
-// current docs if the tournament format changes.
-const COMPETITION_CODE = "WC";
+import { FOOTBALL_DATA_BASE_URL, COMPETITION_CODE } from "../../js/football-data-config.mjs";
 
 // One upstream endpoint per route exposed to the client, plus this cache's
 // TTL. A single fixed TTL per route (rather than branching per-match on
@@ -33,7 +29,7 @@ export function resolveRoute(pathname) {
 }
 
 export function buildUpstreamUrl(upstreamPath) {
-  return `https://api.football-data.org/v4/competitions/${COMPETITION_CODE}/${upstreamPath}`;
+  return `${FOOTBALL_DATA_BASE_URL}/competitions/${COMPETITION_CODE}/${upstreamPath}`;
 }
 
 export function withCors(response) {

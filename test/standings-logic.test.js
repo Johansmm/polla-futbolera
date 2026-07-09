@@ -28,10 +28,17 @@ const SCORING_CONFIG = {
   },
 };
 
+// mergeMatchData takes a Map keyed by the source's own match id — this
+// builds one from a plain array of fixtures, the shape that's easiest to
+// write test data as.
+function toSourceMap(matches) {
+  return new Map(matches.map((m) => [m.id, m]));
+}
+
 function buildScenario() {
   const finishedR16 = mergeMatchData(
     { id: "r16_01", match_id: "r16_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 1 },
-    [
+    toSourceMap([
       {
         id: 1,
         stage: "LAST_16",
@@ -40,14 +47,14 @@ function buildScenario() {
         awayTeam: { name: "Morocco", crest: null },
         score: { duration: "REGULAR", fullTime: { home: 2, away: 1 } },
       },
-    ]
+    ])
   );
 
   // Kickoff far in the future — not locked yet, so selectScorableMatches
   // must exclude it even though it has a configured multiplier.
   const upcomingR16 = mergeMatchData(
     { id: "r16_02", match_id: "r16_02", kickoff_at: new Date(Date.now() + 2 * DAY), source_match_id: 2 },
-    [
+    toSourceMap([
       {
         id: 2,
         stage: "LAST_16",
@@ -56,19 +63,22 @@ function buildScenario() {
         awayTeam: { name: "Japan", crest: null },
         score: { fullTime: { home: null, away: null } },
       },
-    ]
+    ])
   );
 
-  const final = mergeMatchData({ id: "final_01", match_id: "final_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 3 }, [
-    {
-      id: 3,
-      stage: "FINAL",
-      status: "FINISHED",
-      homeTeam: { name: "Argentina", crest: null },
-      awayTeam: { name: "Brazil", crest: null },
-      score: { duration: "REGULAR", fullTime: { home: 2, away: 0 } },
-    },
-  ]);
+  const final = mergeMatchData(
+    { id: "final_01", match_id: "final_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 3 },
+    toSourceMap([
+      {
+        id: 3,
+        stage: "FINAL",
+        status: "FINISHED",
+        homeTeam: { name: "Argentina", crest: null },
+        awayTeam: { name: "Brazil", crest: null },
+        score: { duration: "REGULAR", fullTime: { home: 2, away: 0 } },
+      },
+    ])
+  );
 
   return { finishedR16, upcomingR16, final };
 }
@@ -165,6 +175,6 @@ test("computeStandingsFromData marks a scorable match with no prediction as a mi
   const alice = result.rows[0];
   assert.equal(alice.predictionsSubmitted, 0);
   assert.equal(alice.matchPoints, 0);
-  assert.equal(alice.matchBreakdown[0].points, 0);
+  assert.equal(alice.matchBreakdown.r16_01.points, 0);
   assert.equal(result.specialSections.length, 0);
 });
