@@ -15,7 +15,7 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// Add the ~10 friends here. Re-running this script is safe: it skips any
+// Add your group's clients here. Re-running this script is safe: it skips any
 // user_id that already has a doc, so it never rotates an existing token.
 // user_id must NOT contain underscores — firestore.rules derives the owner
 // of a not-yet-created prediction from splitting the doc ID ("{user_id}_{match_id}")

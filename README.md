@@ -3,6 +3,88 @@
 Static site (no build step) + Firebase Firestore, for a private group predicting
 match scores from the Round of 16 onward. See `CLAUDE.md` for full project context.
 
+## How it works
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant Firestore
+    participant Client as Browser (predict.html / standings.html)
+    participant Worker as Cloudflare Worker
+    participant API as football-data.org
+
+    Admin->>API: node admin/seed.js — fetch fixture list
+    Admin->>Firestore: write match_id + kickoff_at + source_match_id,<br/>users, tokens, team_rosters
+
+    Note over Client,API: Every page load
+    Client->>Firestore: read matches (skeleton) + predictions
+    Client->>Worker: GET /matches
+    Worker->>API: fetch (skipped if cached, TTL 60s)
+    Worker-->>Client: teams, crests, live/final scores
+    Note over Client: merge + compute points client-side — nothing server-side
+
+    Note over Client,Firestore: When a user saves a prediction
+    Client->>Firestore: write predictions/{user_id}_{match_id}
+    Note over Firestore: firestore.rules enforces ownership + kickoff lock
+```
+
+Two flows never touch each other:
+
+- **Saving a prediction** is a direct browser → Firestore write, gated
+  entirely by `firestore.rules` (ownership + "has this match kicked off
+  yet"). The Worker is never involved.
+- **Reading match data** (teams, crests, live/final scores) never touches
+  Firestore for anything beyond `match_id`/`kickoff_at`/`source_match_id` —
+  everything else comes from the Worker on every page load, merged
+  client-side by `js/worker-matches.mjs`, and is never written back to
+  Firestore.
+
+`admin/seed.js` is the only thing that writes match/user data, and it's the
+one piece of this diagram a human runs on purpose — once at the start, and
+again whenever the fixture or squads change (see "Admin workflows" below).
+Nothing computes or stores points anywhere either: `standings.html` reads
+raw predictions + results every time and recomputes with
+`js/scoring-logic.mjs` + `js/standings-logic.mjs`.
+
+## Project structure
+
+- **`*.html`, `css/`** — the static site itself, no build step, opened
+  straight in a browser
+- **`js/`** — client-side logic: Firestore + Worker reads, token auth,
+  scoring/standings computation, and each page's own glue (`predict.js`,
+  `special.js`, `standings.js`)
+- **`firestore.rules`** — the actual security enforcement boundary (see
+  `CLAUDE.md` for the design)
+- **`scoring_config.json`** — tunable point/multiplier weights, read by
+  `js/scoring-logic.mjs`
+- **`worker/`** — Cloudflare Worker proxying football-data.org, KV-cached
+  (see "Cloudflare Worker match proxy" below)
+- **`admin/`** — local-only Admin SDK scripts (seed the fixture/users/
+  rosters, rename a user) — never deployed anywhere, run by hand from your
+  machine
+- **`automation/`** — admin-triggered GitHub Actions script (the
+  missing-predictions report)
+- **`test/`** — unit tests (`node:test`) for every pure `.mjs` module in
+  `js/`/`worker/`, plus the Firestore rules tests (need the local emulator)
+- **`.github/workflows/`** — CI (tests + auto-deploying `firestore.rules`)
+  and the on-demand missing-predictions report
+
+## How auth works without passwords, SMS, or a server
+
+Each user gets a unique unguessable token in their URL. Firestore security
+rules can't read URL params directly, so the client:
+
+1. Signs in anonymously (free, no card required) to get a real `request.auth.uid`.
+2. Looks up `tokens/{token}` to find the matching `user_id`.
+3. Creates a one-time `auth_links/{auth_uid} → { user_id, token }` binding doc,
+   which the security rules verify actually matches the real token before
+   allowing it to be created.
+
+From then on, rules use that binding to check "this browser can only write
+this user's predictions." Multiple devices for the same person just create
+independent binding docs — no coordination needed. See `firestore.rules` and
+`CLAUDE.md` for the full design rationale.
+
 ## Setup (one-time)
 
 1. **Create the Firebase project**
@@ -23,8 +105,33 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
    - `.firebaserc` → replace `REPLACE_WITH_FIREBASE_PROJECT_ID` with your real
      Firebase project ID.
 
-2. **Seed the fixture and users**
-   - Edit `admin/seed.js`: fill in `USERS` (the ~10 friends) — matches
+2. **Set up the Cloudflare Worker** (see "Cloudflare Worker match proxy"
+   below for what it does)
+   - [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) →
+     sign up with an email + password (no card required for the Workers free
+     tier — 100,000 requests/day, far more than this pool's clients will
+     ever use). Verify the email, log in to the dashboard once — no
+     project/site needs to be created there manually, `wrangler deploy`
+     (further down this list) creates the Worker itself.
+   - `npm install -g wrangler` (or run it via `npx` from `worker/`), then
+     `npx wrangler login` — opens a browser tab to authorize the CLI against
+     the account you just created.
+   - From `worker/`: `npx wrangler kv namespace create MATCH_CACHE`, then
+     paste the returned namespace `id` into `wrangler.toml`'s
+     `[[kv_namespaces]]` block.
+   - `npx wrangler secret put API_KEY` from `worker/` — `API_KEY` here is
+     the secret's *name* (must match `env.API_KEY` in
+     `worker/src/index.mjs`), not the value. Wrangler then prompts you
+     interactively for the value: paste a free API key from
+     [football-data.org](https://www.football-data.org/) (sign up, then
+     copy the key from your account dashboard — the same token
+     `admin/seed.js` uses via `FOOTBALL_DATA_TOKEN`, see the next step).
+   - `npm run deploy` from `worker/` (wraps `wrangler deploy`). Wrangler
+     prints the deployed Worker's URL — paste it into
+     `js/worker-config.js`'s `WORKER_URL`.
+
+3. **Seed the fixture and users**
+   - Edit `admin/seed.js`: fill in `USERS` (your group's clients) — matches
      themselves need no hand-typed fixture list, see below.
    - `cd admin && npm install`
    - `FOOTBALL_DATA_TOKEN=<your token> node seed.js` (free key from
@@ -35,13 +142,13 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
      script). The same run also seeds `team_rosters/{team}` — every team's
      squad in one API call, backing the champion/top-scorer dropdowns on
      `special.html`.
-   - The script prints each friend's `predict.html?token=...` link — save
+   - The script prints each client's `predict.html?token=...` link — save
      these, they aren't shown again unless you add a brand-new user later.
    - Safe to re-run any time (e.g. once brackets update, or a squad changes
      materially like a late injury replacement) — existing matches keep
      their `match_id`, existing users keep their token.
 
-3. **Deploy the security rules**
+4. **Deploy the security rules**
    - Requires the [Firebase CLI](https://firebase.google.com/docs/cli):
      `npm install -g firebase-tools`, then `firebase login`.
    - `firebase deploy --only firestore:rules`
@@ -72,7 +179,7 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
      `admin/serviceAccountKey.json` later doesn't require repeating it.
      No billing plan or cost is involved; IAM role grants are free.
 
-4. **Enable GitHub Pages**
+5. **Enable GitHub Pages**
    - Repo Settings → Pages → Source: "Deploy from a branch" → Branch: `main`,
      folder `/ (root)`.
    - The site will be served at `https://johansmm.github.io/polla-futbolera/`
@@ -105,7 +212,7 @@ currently:
   `@firebase/rules-unit-testing` (needs the emulator), covering:
   unauthenticated reads being denied, the token→`auth_links` binding
   requiring the real token, owners vs. strangers writing predictions, the
-  auto-lock check (past `kickoff_at` or `locked: true`), other users'
+  auto-lock check (purely `kickoff_at` — no stored `locked` field), other users'
   predictions staying hidden until a match kicks off, and
   `special_predictions` being editable only before its configured deadline.
 - `test/worker-matches.test.js` — plain unit tests for `js/worker-matches.mjs`'s
@@ -154,32 +261,8 @@ multiply real football-data.org calls:
   score reasonably fresh without approaching the free tier's 10 calls/min
   limit (60s cache ≈ 1 call/min)
 
-One-time setup:
-
-1. **Create the Cloudflare account**
-   - [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) →
-     sign up with an email + password (no card required for the Workers free
-     tier — 100,000 requests/day, far more than ~10 friends checking scores
-     will ever use).
-   - Verify the email address (Cloudflare sends a confirmation link) and log
-     in to the dashboard once — no project/site needs to be created there
-     manually, `wrangler deploy` (further down this list) creates the Worker
-     itself.
-2. `npm install -g wrangler` (or run it via `npx` from `worker/`), then
-   `npx wrangler login` — this opens a browser tab to authorize the CLI
-   against the account you just created.
-3. From `worker/`: `npx wrangler kv namespace create MATCH_CACHE`, then paste
-   the returned namespace `id` into `wrangler.toml`'s `[[kv_namespaces]]`
-   block.
-4. `npx wrangler secret put API_KEY` from `worker/` — `API_KEY` here is the
-   secret's *name* (must match `env.API_KEY` in `worker/src/index.mjs`), not
-   the value. Wrangler then prompts you interactively for the value: paste
-   a free API key from [football-data.org](https://www.football-data.org/)
-   (sign up, then copy the key from your account dashboard — the same token
-   `admin/seed.js` uses via `FOOTBALL_DATA_TOKEN`).
-5. `npm run deploy` from `worker/` (wraps `wrangler deploy`). Wrangler prints
-   the deployed Worker's URL — paste it into `js/worker-config.js`'s
-   `WORKER_URL`.
+One-time setup (Cloudflare account, KV namespace, secret, deploy) is step 2
+of "Setup (one-time)" above.
 
 `npm run dev` from `worker/` runs it locally via `wrangler dev` for testing
 against real football-data.org calls. `wrangler dev` doesn't read the secret
@@ -190,57 +273,13 @@ testing create `worker/.dev.vars` (gitignored) with:
 API_KEY=your-football-data.org-token
 ```
 
-## Missing predictions report (manual)
-
-`.github/workflows/missing-predictions.yml` runs `automation/missing-predictions.js`
-on demand only (`workflow_dispatch` — no schedule) — trigger it from the
-Actions tab, including from the GitHub mobile app, so you don't need your
-computer on to check who still needs a nudge. Per user, lists which matches
-kicking off in the next 24 hours they still have no `predictions` doc for,
-plus their champion/top-scorer picks if that deadline also falls in the next
-24 hours — one line per user, ready to paste into a nudge message. Each item
-shows how much time is left before it locks (`HHhMMm`), e.g.:
-
-```
-Users with missing predictions in the next 24h:
-* Hollwann Leon: Canada vs Morocco (r16_01, 05h17m), Champion pick (05h17m), Top scorer pick (05h17m)
-
-(HHhMMm) = time left before that item locks.
-```
-
-It deliberately only checks whether a document/field **exists** — the script
-never calls `.data()` on a `predictions` doc, and never reads the actual
-values of `champion_pick`/`top_scorer_pick`, so there's no code path that
-could print anyone's picks. You see who's missing something, never what
-anyone picked.
-
-Uses the same `FIREBASE_SERVICE_ACCOUNT_JSON` repo Secret set up in "Deploy
-the security rules" above — no extra setup needed if that's already
-configured.
-
-To run it locally instead of via Actions (using your local
-`admin/serviceAccountKey.json` instead of the GitHub Secret):
-
-```bash
-# Git Bash
-cd automation
-FIREBASE_SERVICE_ACCOUNT_JSON="$(cat ../admin/serviceAccountKey.json)" node missing-predictions.js
-```
-
-```powershell
-# PowerShell
-cd automation
-$env:FIREBASE_SERVICE_ACCOUNT_JSON = Get-Content ../admin/serviceAccountKey.json -Raw
-node missing-predictions.js
-```
-
 ## Admin workflows (ongoing)
 
-- **Enter a real match result**: Firebase Console → Firestore → `matches/{match_id}`
-  → set `real_score_a` / `real_score_b`.
-- **Force-lock a match early**: same doc → set `locked: true`. Normally not
-  needed — matches auto-lock once `kickoff_at` has passed (enforced server-side
-  in `firestore.rules`, not by this stored field).
+- **Match results aren't entered anywhere** — nothing to do once a match
+  ends. football-data.org marks it `FINISHED`, the Worker serves that score
+  on the next request, and every client picks it up automatically. Matches
+  also lock purely by `kickoff_at` (enforced in `firestore.rules`) — there's
+  no admin override to force a match locked early.
 - **Regenerate a user's token** (e.g. they lost their link): in the Console,
   delete `tokens/{oldToken}`, create `tokens/{newToken} → { user_id }`, and
   update `users/{user_id}.token` to the new value. If the old link may have
@@ -274,7 +313,7 @@ node missing-predictions.js
     deleted from the old one, so a failure partway through leaves
     duplicated data, never lost data.
 - **Points aren't calculated by an admin step at all** — there's nothing to
-  run after entering a match's real score. `standings.html` reads
+  run once a match ends. `standings.html` reads
   `matches`/`predictions`/`special_predictions` directly and computes
   everyone's points on the fly using `js/scoring-logic.mjs` +
   `scoring_config.json`, so there's no `points_earned` field to recompute or
@@ -284,63 +323,46 @@ node missing-predictions.js
   via the Console — champion/finalists/semifinalists are derived
   automatically from the `final`/`sf` matches instead.
 
-## Project structure
+## Missing predictions report (manual)
+
+`.github/workflows/missing-predictions.yml` runs `automation/missing-predictions.js`
+on demand only (`workflow_dispatch` — no schedule) — trigger it from the
+Actions tab, including from the GitHub mobile app, so you don't need your
+computer on to check who still needs a nudge. Per user, lists which matches
+kicking off in the next 24 hours they still have no `predictions` doc for,
+plus their champion/top-scorer picks if that deadline also falls in the next
+24 hours — one line per user, ready to paste into a nudge message. Each item
+shows how much time is left before it locks (`HHhMMm`), e.g.:
 
 ```
-index.html          landing page; redirects to predict.html?token=... if present
-predict.html         main prediction form (score picks)
-special.html         champion + top-scorer picks (editable until the deadline)
-standings.html        leaderboard (points computed on read, no server step)
-css/style.css
-js/firebase-config.js  public Firebase web config (not a secret)
-js/firebase-init.js    Firebase SDK init
-js/auth.js             token -> user_id resolution + anonymous-auth binding
-js/token-gate.js       shared token-resolution UI flow used by predict.js, special.js, and standings.js
-js/nav.js              shared page nav; threads ?token= through every internal link
-js/ui.js               small shared DOM helpers (status/feedback, flag imgs, date formatting)
-js/queries.js          Firestore + Worker reads shared by predict.js/special.js/standings.js
-                        (matches merged with worker-matches.mjs, deadline, rosters)
-js/worker-config.js    the deployed Worker's URL (public, not a secret)
-js/worker-matches.mjs  merges a Firestore match with its Worker/football-data.org entry
-js/lock-logic.mjs      shared timing/lookup logic (isMatchLocked, isPastDeadline, findTeamForPlayer)
-js/scoring-logic.mjs   pure scoring functions (no stored points_earned — computed on read)
-js/standings-logic.mjs pure standings computation (rows, ranking, breakdown sections)
-js/predict.js          predict.html page logic
-js/special.js          special.html page logic
-js/standings.js        standings.html page logic: fetches raw predictions/picks/results and
-                        scores them client-side with js/scoring-logic.mjs + js/standings-logic.mjs
-firestore.rules         security rules (see CLAUDE.md and the design notes therein)
-admin/seed.js           local-only Admin SDK script: derives the matches skeleton
-                        (match_id/kickoff_at/source_match_id) from football-data.org's fixture
-                        list, seeds users/tokens, the special_predictions deadline, and team_rosters
-admin/rename-user.js    local-only Admin SDK script: fixes a user's name or user_id
-scoring_config.json         tunable point/multiplier weights, read by js/scoring-logic.mjs
-test/firestore.rules.test.js   security-rules tests (run via `npm test`, needs the emulator)
-test/lock-logic.test.js        unit tests for js/lock-logic.mjs (no emulator needed)
-test/scoring-logic.test.js     unit tests for js/scoring-logic.mjs (no emulator needed)
-test/worker-matches.test.js    unit tests for js/worker-matches.mjs (no emulator needed)
-test/worker-scoring-integration.test.js  scoring-logic.mjs fed a Worker-merged match, end to end
-test/standings-logic.test.js   unit tests for js/standings-logic.mjs (no emulator needed)
-.github/workflows/ci.yml               runs the test suite on every PR / push to main
-automation/missing-predictions.js          reports who's missing a pick for matches in the next 24h
-.github/workflows/missing-predictions.yml  runs automation/missing-predictions.js on demand only
-worker/src/index.mjs   Cloudflare Worker: proxies football-data.org matches via a KV cache
-worker/wrangler.toml    Worker config (KV namespace binding, deploy target)
-test/worker.test.js     unit tests for worker/src/index.mjs (no Cloudflare account needed)
+Users with missing predictions in the next 24h:
+* Jane Doe: Canada vs Morocco (r16_01, 05h17m), Champion pick (05h17m), Top scorer pick (05h17m)
+
+(HHhMMm) = time left before that item locks.
 ```
 
-## How auth works without passwords, SMS, or a server
+It deliberately only checks whether a document/field **exists** — the script
+never calls `.data()` on a `predictions` doc, and never reads the actual
+values of `champion_pick`/`top_scorer_pick`, so there's no code path that
+could print anyone's picks. You see who's missing something, never what
+anyone picked.
 
-Each user gets a unique unguessable token in their URL. Firestore security
-rules can't read URL params directly, so the client:
+Uses the same `FIREBASE_SERVICE_ACCOUNT_JSON` repo Secret set up in "Deploy
+the security rules" above — no extra setup needed if that's already
+configured.
 
-1. Signs in anonymously (free, no card required) to get a real `request.auth.uid`.
-2. Looks up `tokens/{token}` to find the matching `user_id`.
-3. Creates a one-time `auth_links/{auth_uid} → { user_id, token }` binding doc,
-   which the security rules verify actually matches the real token before
-   allowing it to be created.
+To run it locally instead of via Actions (using your local
+`admin/serviceAccountKey.json` instead of the GitHub Secret):
 
-From then on, rules use that binding to check "this browser can only write
-this user's predictions." Multiple devices for the same person just create
-independent binding docs — no coordination needed. See `firestore.rules` and
-`CLAUDE.md` for the full design rationale.
+```bash
+# Git Bash
+cd automation
+FIREBASE_SERVICE_ACCOUNT_JSON="$(cat ../admin/serviceAccountKey.json)" node missing-predictions.js
+```
+
+```powershell
+# PowerShell
+cd automation
+$env:FIREBASE_SERVICE_ACCOUNT_JSON = Get-Content ../admin/serviceAccountKey.json -Raw
+node missing-predictions.js
+```
