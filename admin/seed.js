@@ -15,13 +15,24 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// Fill in team_a/team_b once the bracket is known; kickoff_at must always
-// be a real timestamp so the auto-lock rule (request.time > kickoff_at)
-// has something to compare against. Add every match through the Final here.
-// Re-running this script is safe: existing matches only get their fixture
-// fields (phase/teams/kickoff_at) refreshed — real_score_a, real_score_b and
-// locked are left alone once a match has been created, so entering results
-// via the console won't get wiped out by a later re-seed.
+// match_id, phase, and kickoff_at are stored — team/crest/score fields are
+// dropped, since those come from the Cloudflare Worker proxy in front of
+// football-data.org instead. `phase` stays for now: js/predict.js groups
+// matches by it to render each phase's section, and js/standings.js uses it
+// to look up that phase's scoring multiplier (scoring_config.json) — neither
+// reads match data from the Worker yet, so there's nowhere client-side to
+// derive it from in the meantime. A match missing `phase` doesn't just show
+// blank like a missing team name would — predict.js never renders it at all,
+// since its per-phase grouping only ever looks at the phases it knows about.
+// Once the client reads match data from the Worker, it could derive `phase`
+// itself from football-data.org's raw `stage` value (the same translation
+// automation/sync-fixtures.js's STAGE_TO_PHASE does today, just running in
+// the browser), and `phase` could drop from here too. kickoff_at must always
+// be a real timestamp so the auto-lock rule (request.time > kickoff_at) has
+// something to compare against; it's available from the published FIFA
+// schedule before the tournament starts, so this collection never needs
+// syncing again once seeded. Re-running this script is safe and idempotent:
+// it just re-writes the same fields.
 //
 // kickoff_at is written in Central European time — use the "+02:00" offset
 // (CEST, UTC+2), which covers the whole tournament window (late June through
@@ -29,8 +40,8 @@ const db = admin.firestore();
 // October). new Date(...) parses the offset correctly, so Firestore still
 // stores the right absolute instant regardless of the offset used here.
 const MATCHES = [
-  { match_id: "r16_01", phase: "r16", team_a: "Canada", team_b: "Morocco", kickoff_at: "2026-07-04T19:00:00+02:00" },
-  { match_id: "r16_02", phase: "r16", team_a: "Paraguay", team_b: "France", kickoff_at: "2026-07-04T23:00:00+02:00" },
+  { match_id: "r16_01", phase: "r16", kickoff_at: "2026-07-04T19:00:00+02:00" }, // Canada vs Morocco
+  { match_id: "r16_02", phase: "r16", kickoff_at: "2026-07-04T23:00:00+02:00" }, // Paraguay vs France
   // ... add the remaining Round of 16, QF, SF, Third Place, Final matches.
 ];
 
@@ -56,55 +67,45 @@ function generateToken() {
 }
 
 async function seedMatches() {
-  let created = 0;
-  let updated = 0;
+  const batch = db.batch();
 
   for (const match of MATCHES) {
     const ref = db.collection("matches").doc(match.match_id);
-    const existing = await ref.get();
-
-    const fixtureFields = {
+    batch.set(ref, {
       match_id: match.match_id,
       phase: match.phase,
-      team_a: match.team_a,
-      team_b: match.team_b,
       kickoff_at: admin.firestore.Timestamp.fromDate(new Date(match.kickoff_at)),
-    };
-
-    if (existing.exists) {
-      // Update fixture fields only — never touch real_score_a / real_score_b /
-      // locked here, since those may already have been set manually via the
-      // Firebase console (entering a real result, or force-locking a match).
-      await ref.set(fixtureFields, { merge: true });
-      updated++;
-    } else {
-      await ref.set({
-        ...fixtureFields,
-        real_score_a: null,
-        real_score_b: null,
-        locked: false,
-      });
-      created++;
-    }
+    });
   }
 
-  console.log(`Matches: ${created} created, ${updated} updated (results/locked untouched).`);
+  await batch.commit();
+  console.log(`Matches: seeded ${MATCHES.length} (match_id + phase + kickoff_at only).`);
 }
 
 // Champion/top-scorer picks (special_predictions) can be created or edited
 // up until this deadline, per firestore.rules' specialPredictionsDeadlinePassed().
-// Derived from the actual `matches` collection (not just the MATCHES array
-// above), so it stays correct even if some r16 matches were created by
-// automation/sync-fixtures.js instead of this script.
+// Looks up the current kickoff_at for exactly the match_ids in MATCHES above,
+// rather than scanning the whole `matches` collection — other tools may sync
+// extra matches this pool doesn't track into that same collection, and
+// scoping to this pool's own match_ids avoids depending on any phase name or
+// ordering to tell those apart.
 async function seedSpecialPredictionsDeadline() {
-  const snap = await db.collection("matches").where("phase", "==", "r16").get();
+  if (!MATCHES.length) {
+    console.log("MATCHES is empty — skipping special_predictions deadline.");
+    return;
+  }
+
+  const snap = await db
+    .collection("matches")
+    .where(admin.firestore.FieldPath.documentId(), "in", MATCHES.map((m) => m.match_id))
+    .get();
   const kickoffs = snap.docs
     .map((doc) => doc.data().kickoff_at)
     .filter(Boolean)
     .map((ts) => ts.toDate().getTime());
 
   if (!kickoffs.length) {
-    console.log("No r16 matches with a kickoff_at yet — skipping special_predictions deadline.");
+    console.log("No matches with a kickoff_at yet — skipping special_predictions deadline.");
     return;
   }
 
@@ -114,7 +115,7 @@ async function seedSpecialPredictionsDeadline() {
     locked_after: admin.firestore.Timestamp.fromDate(earliest),
   });
 
-  console.log(`special_predictions locks at ${earliest.toISOString()} (first r16 kickoff).`);
+  console.log(`special_predictions locks at ${earliest.toISOString()} (earliest kickoff among this pool's matches).`);
 }
 
 // Populates team_rosters/{team} so the special-predictions form (champion +
