@@ -1,0 +1,14 @@
+# Cloudflare Worker config for the football-data.org match-data proxy.
+# Deploy from this directory with `npm run deploy` (wraps `wrangler deploy`).
+name = "polla-match-proxy"
+main = "src/index.mjs"
+compatibility_date = "2026-07-09"
+
+# Created once via `npx wrangler kv namespace create MATCH_CACHE`, then paste
+# the returned id below. Shared by every route in src/index.mjs — see ROUTES.
+[[kv_namespaces]]
+binding = "MATCH_CACHE"
+id = "78b75ddbd6e043f1a5076e720ca9bbe1"
+
+# The football-data.org API token itself is NOT set here — it's a secret,
+# pushed via `npx wrangler secret put API_KEY` so it never lands in the repo.

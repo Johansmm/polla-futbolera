@@ -203,6 +203,61 @@ one with an auto-generated `match_id`. Once football-data.org marks a match
 console could get reverted on the next sync; disable the workflow first if
 you need a manual value to stick.
 
+## Cloudflare Worker match proxy (in progress)
+
+`worker/` is a Cloudflare Worker that proxies football-data.org, part of an
+ongoing migration to a cron-free architecture: instead of a scheduled job
+writing fixture/result data into Firestore (the sync described above), the
+client will fetch match data from this Worker directly on page load. It
+exists alongside the sync for now — the remaining migration steps (seeding a
+minimal `matches` collection, updating security rules, switching the client
+over, and eventually removing the sync workflow) are still in progress.
+
+The Worker exposes one read-only route, backed by a Workers KV cache shared
+across every concurrent client so the group loading the app at once doesn't
+multiply real football-data.org calls:
+
+- `GET /matches` → every World Cup match in one response — scheduled
+  fixtures, in-progress scores, and finished results alike, exactly as
+  football-data.org returns them — cached 60s, which keeps a live match's
+  score reasonably fresh without approaching the free tier's 10 calls/min
+  limit (60s cache ≈ 1 call/min)
+
+One-time setup:
+
+1. **Create the Cloudflare account**
+   - [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) →
+     sign up with an email + password (no card required for the Workers free
+     tier — 100,000 requests/day, far more than ~10 friends checking scores
+     will ever use).
+   - Verify the email address (Cloudflare sends a confirmation link) and log
+     in to the dashboard once — no project/site needs to be created there
+     manually, `wrangler deploy` (further down this list) creates the Worker
+     itself.
+2. `npm install -g wrangler` (or run it via `npx` from `worker/`), then
+   `npx wrangler login` — this opens a browser tab to authorize the CLI
+   against the account you just created.
+3. From `worker/`: `npx wrangler kv namespace create MATCH_CACHE`, then paste
+   the returned namespace `id` into `wrangler.toml`'s `[[kv_namespaces]]`
+   block.
+4. `npx wrangler secret put API_KEY` from `worker/` — `API_KEY` here is the
+   secret's *name* (must match `env.API_KEY` in `worker/src/index.mjs`), not
+   the value. Wrangler then prompts you interactively for the value: paste
+   the same football-data.org token used by `automation/sync-fixtures.js` (see the
+   "Automatic fixture/results sync" section above for how to get one).
+5. `npm run deploy` from `worker/` (wraps `wrangler deploy`). Wrangler prints
+   the deployed Worker's URL — that's what the client will call once it's
+   switched over to fetching match data this way.
+
+`npm run dev` from `worker/` runs it locally via `wrangler dev` for testing
+against real football-data.org calls. `wrangler dev` doesn't read the secret
+you pushed with `wrangler secret put` (that's production-only), so for local
+testing create `worker/.dev.vars` (gitignored) with:
+
+```
+API_KEY=your-football-data.org-token
+```
+
 ## Missing predictions report (manual)
 
 `.github/workflows/missing-predictions.yml` runs `automation/missing-predictions.js`
@@ -329,6 +384,9 @@ automation/sync-fixtures.js            optional: auto-syncs fixtures/results fro
 .github/workflows/sync-fixtures.yml    runs it via 2 jobs: every 3h (unconditional) + every 5min (if pending)
 automation/missing-predictions.js          reports who's missing a pick for matches in the next 24h
 .github/workflows/missing-predictions.yml  runs automation/missing-predictions.js on demand only
+worker/src/index.mjs   Cloudflare Worker: proxies football-data.org matches via a KV cache
+worker/wrangler.toml    Worker config (KV namespace binding, deploy target)
+test/worker.test.js     unit tests for worker/src/index.mjs (no Cloudflare account needed)
 ```
 
 ## How auth works without passwords, SMS, or a server
