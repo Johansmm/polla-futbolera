@@ -106,6 +106,10 @@ function buildFixturePatch(apiMatch) {
   const patch = {
     phase: resolvePhase(apiMatch.stage),
     kickoffDate: new Date(apiMatch.utcDate),
+    // Backfills source_match_id onto matches this script already knows how
+    // to find (by kickoff_at + phase) for docs seeded before admin/seed.js
+    // started writing it directly — temporary, until this script is removed.
+    source_match_id: apiMatch.id,
   };
   if (apiMatch.homeTeam?.name) patch.team_a = apiMatch.homeTeam.name;
   if (apiMatch.awayTeam?.name) patch.team_b = apiMatch.awayTeam.name;
@@ -237,9 +241,14 @@ if (require.main === module) {
   // in the same run's loop sees it as taken, matching the old behavior
   // where a fresh Firestore query would have shown the same thing.
   const syncFixture = async (apiMatch, matchDocs) => {
-    const { phase, kickoffDate, team_a, team_b, team_a_crest_url, team_b_crest_url } = buildFixturePatch(apiMatch);
+    const { phase, kickoffDate, source_match_id, team_a, team_b, team_a_crest_url, team_b_crest_url } =
+      buildFixturePatch(apiMatch);
 
-    const fixtureFields = { phase, kickoff_at: admin.firestore.Timestamp.fromDate(kickoffDate) };
+    const fixtureFields = {
+      phase,
+      kickoff_at: admin.firestore.Timestamp.fromDate(kickoffDate),
+      source_match_id,
+    };
     if (team_a) fixtureFields.team_a = team_a;
     if (team_b) fixtureFields.team_b = team_b;
     if (team_a_crest_url) fixtureFields.team_a_crest_url = team_a_crest_url;

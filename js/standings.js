@@ -5,7 +5,6 @@ import {
   doc,
   query,
   where,
-  orderBy,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
@@ -21,7 +20,7 @@ import {
   isMatchLive,
   effectiveScore,
 } from "./scoring-logic.mjs";
-import { fetchSpecialPredictionsDeadline, fetchTeamRosters, fetchUserName } from "./queries.js";
+import { fetchSpecialPredictionsDeadline, fetchTeamRosters, fetchUserName, fetchMatches } from "./queries.js";
 
 const PHASE_LABELS = {
   r16: "Round of 16",
@@ -56,11 +55,6 @@ async function fetchScoringConfig() {
 async function fetchUsers() {
   const snap = await getDocs(collection(db, "users"));
   return snap.docs.map((d) => d.data());
-}
-
-async function fetchMatches() {
-  const snap = await getDocs(query(collection(db, "matches"), orderBy("kickoff_at")));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 // Predictions have no unconstrained list rule — only a per-match query

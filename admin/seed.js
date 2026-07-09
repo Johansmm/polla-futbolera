@@ -15,36 +15,6 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// match_id, phase, and kickoff_at are stored — team/crest/score fields are
-// dropped, since those come from the Cloudflare Worker proxy in front of
-// football-data.org instead. `phase` stays for now: js/predict.js groups
-// matches by it to render each phase's section, and js/standings.js uses it
-// to look up that phase's scoring multiplier (scoring_config.json) — neither
-// reads match data from the Worker yet, so there's nowhere client-side to
-// derive it from in the meantime. A match missing `phase` doesn't just show
-// blank like a missing team name would — predict.js never renders it at all,
-// since its per-phase grouping only ever looks at the phases it knows about.
-// Once the client reads match data from the Worker, it could derive `phase`
-// itself from football-data.org's raw `stage` value (the same translation
-// automation/sync-fixtures.js's STAGE_TO_PHASE does today, just running in
-// the browser), and `phase` could drop from here too. kickoff_at must always
-// be a real timestamp so the auto-lock rule (request.time > kickoff_at) has
-// something to compare against; it's available from the published FIFA
-// schedule before the tournament starts, so this collection never needs
-// syncing again once seeded. Re-running this script is safe and idempotent:
-// it just re-writes the same fields.
-//
-// kickoff_at is written in Central European time — use the "+02:00" offset
-// (CEST, UTC+2), which covers the whole tournament window (late June through
-// the Final in mid-July, before EU clocks fall back to CET/+01:00 in
-// October). new Date(...) parses the offset correctly, so Firestore still
-// stores the right absolute instant regardless of the offset used here.
-const MATCHES = [
-  { match_id: "r16_01", phase: "r16", kickoff_at: "2026-07-04T19:00:00+02:00" }, // Canada vs Morocco
-  { match_id: "r16_02", phase: "r16", kickoff_at: "2026-07-04T23:00:00+02:00" }, // Paraguay vs France
-  // ... add the remaining Round of 16, QF, SF, Third Place, Final matches.
-];
-
 // Add the ~10 friends here. Re-running this script is safe: it skips any
 // user_id that already has a doc, so it never rotates an existing token.
 // user_id must NOT contain underscores — firestore.rules derives the owner
@@ -55,67 +25,137 @@ const USERS = [
   // ... add the rest of the group here.
 ];
 
-// Optional: if set, also seeds team_rosters (see seedTeamRosters() below) so
-// the champion/top-scorer picks form has real team/player names to pick
-// from. Get a free key from https://www.football-data.org/ — leave unset to
-// skip that step entirely (matches/users/tokens still seed normally).
+// Required — seedMatches() below fetches the competition's full fixture
+// list to build the matches skeleton, and seedTeamRosters() uses the same
+// token for team/player data. Get a free key from https://www.football-data.org/.
 const FOOTBALL_DATA_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 const COMPETITION_CODE = "WC"; // FIFA World Cup, per football-data.org's docs
+
+function generateMatchId(phase, takenIds) {
+  let n = 1;
+  let candidate;
+  do {
+    candidate = `${phase}_${String(n).padStart(2, "0")}`;
+    n += 1;
+  } while (takenIds.has(candidate));
+  return candidate;
+}
 
 function generateToken() {
   return crypto.randomBytes(16).toString("base64url");
 }
 
-async function seedMatches() {
-  const batch = db.batch();
+async function fetchFromFootballData(path) {
+  const res = await fetch(`https://api.football-data.org/v4/competitions/${COMPETITION_CODE}/${path}`, {
+    headers: { "X-Auth-Token": FOOTBALL_DATA_TOKEN },
+  });
 
-  for (const match of MATCHES) {
-    const ref = db.collection("matches").doc(match.match_id);
-    batch.set(ref, {
-      match_id: match.match_id,
-      phase: match.phase,
-      kickoff_at: admin.firestore.Timestamp.fromDate(new Date(match.kickoff_at)),
+  if (!res.ok) {
+    throw new Error(`football-data.org request failed: ${res.status} ${await res.text()}`);
+  }
+
+  return res.json();
+}
+
+// Only match_id, kickoff_at, and source_match_id (the competition's own id
+// for this fixture) are stored — team names, crests, and scores come from
+// the Cloudflare Worker proxy at read time instead (see
+// js/worker-matches.mjs), which derives `phase` there too from the same raw
+// `stage` value this function only uses transiently, to build a readable
+// match_id; firestore.rules never needs phase, only kickoff_at.
+//
+// Deliberately does NOT filter by stage: every match in the competition
+// (group stage, Round of 32, etc., not just what this pool tracks) gets a
+// doc. Relevance is already enforced downstream — js/predict.js only
+// renders phases it knows about, js/standings.js only scores phases with a
+// configured multiplier in scoring_config.json — so filtering here too would
+// just be the same rule in a second place.
+//
+// Safe to re-run: an existing match is found by source_match_id, not by
+// re-deriving match_id, so it keeps its original match_id even if the API's
+// response order changes between runs; only a fixture never seeded before
+// gets a newly generated one.
+async function seedMatches(resolvePhase) {
+  if (!FOOTBALL_DATA_TOKEN) {
+    throw new Error("FOOTBALL_DATA_TOKEN is required — get a free key from https://www.football-data.org/");
+  }
+
+  const fixtures = (await fetchFromFootballData("matches")).matches.filter((m) => m.utcDate);
+
+  const existingSnap = await db.collection("matches").get();
+  const existingIdBySourceId = new Map(existingSnap.docs.map((doc) => [doc.data().source_match_id, doc.id]));
+
+  // Numbered in kickoff order within each phase, so match_id stays readable
+  // ("r16_01" is whichever r16 match kicks off first) regardless of the
+  // order football-data.org happens to return fixtures in.
+  const sortedFixtures = [...fixtures].sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate));
+
+  const takenIdsByPhase = new Map();
+  for (const matchId of existingIdBySourceId.values()) {
+    const phase = matchId.replace(/_\d+$/, "");
+    if (!takenIdsByPhase.has(phase)) takenIdsByPhase.set(phase, new Set());
+    takenIdsByPhase.get(phase).add(matchId);
+  }
+
+  const batch = db.batch();
+  const seeded = [];
+  let created = 0;
+  let updated = 0;
+
+  for (const apiMatch of sortedFixtures) {
+    const phase = resolvePhase(apiMatch.stage);
+    let matchId = existingIdBySourceId.get(apiMatch.id);
+
+    if (matchId) {
+      updated++;
+    } else {
+      const taken = takenIdsByPhase.get(phase) ?? new Set();
+      matchId = generateMatchId(phase, taken);
+      taken.add(matchId);
+      takenIdsByPhase.set(phase, taken);
+      created++;
+    }
+
+    const kickoffAt = new Date(apiMatch.utcDate);
+    batch.set(db.collection("matches").doc(matchId), {
+      match_id: matchId,
+      kickoff_at: admin.firestore.Timestamp.fromDate(kickoffAt),
+      source_match_id: apiMatch.id,
     });
+
+    seeded.push({ matchId, phase, kickoffAt });
   }
 
   await batch.commit();
-  console.log(`Matches: seeded ${MATCHES.length} (match_id + phase + kickoff_at only).`);
+  console.log(`Matches: ${created} created, ${updated} updated (match_id + kickoff_at + source_match_id only).`);
+  return seeded;
 }
 
 // Champion/top-scorer picks (special_predictions) can be created or edited
 // up until this deadline, per firestore.rules' specialPredictionsDeadlinePassed().
-// Looks up the current kickoff_at for exactly the match_ids in MATCHES above,
-// rather than scanning the whole `matches` collection — other tools may sync
-// extra matches this pool doesn't track into that same collection, and
-// scoping to this pool's own match_ids avoids depending on any phase name or
-// ordering to tell those apart.
-async function seedSpecialPredictionsDeadline() {
-  if (!MATCHES.length) {
-    console.log("MATCHES is empty — skipping special_predictions deadline.");
+// Takes seedMatches()'s in-memory result rather than querying Firestore —
+// phase isn't a stored field (see seedMatches() above), so there'd be
+// nothing to filter matches by if this queried the matches collection
+// directly, and group-stage/Round-of-32 kickoffs (also seeded there,
+// deliberately unfiltered) would otherwise pollute "earliest kickoff" with
+// matches this pool never tracks.
+async function seedSpecialPredictionsDeadline(seededMatches, trackedPhases) {
+  const trackedKickoffs = seededMatches
+    .filter((m) => trackedPhases.has(m.phase))
+    .map((m) => m.kickoffAt.getTime());
+
+  if (!trackedKickoffs.length) {
+    console.log("No tracked-phase matches with a kickoff yet — skipping special_predictions deadline.");
     return;
   }
 
-  const snap = await db
-    .collection("matches")
-    .where(admin.firestore.FieldPath.documentId(), "in", MATCHES.map((m) => m.match_id))
-    .get();
-  const kickoffs = snap.docs
-    .map((doc) => doc.data().kickoff_at)
-    .filter(Boolean)
-    .map((ts) => ts.toDate().getTime());
-
-  if (!kickoffs.length) {
-    console.log("No matches with a kickoff_at yet — skipping special_predictions deadline.");
-    return;
-  }
-
-  const earliest = new Date(Math.min(...kickoffs));
+  const earliest = new Date(Math.min(...trackedKickoffs));
 
   await db.collection("config").doc("special_predictions").set({
     locked_after: admin.firestore.Timestamp.fromDate(earliest),
   });
 
-  console.log(`special_predictions locks at ${earliest.toISOString()} (earliest kickoff among this pool's matches).`);
+  console.log(`special_predictions locks at ${earliest.toISOString()} (earliest kickoff among tracked phases).`);
 }
 
 // Populates team_rosters/{team} so the special-predictions form (champion +
@@ -125,20 +165,7 @@ async function seedSpecialPredictionsDeadline() {
 // against the real API: /v4/competitions/WC/teams returns full squads on
 // the free tier, no per-team requests needed).
 async function seedTeamRosters() {
-  if (!FOOTBALL_DATA_TOKEN) {
-    console.log("FOOTBALL_DATA_TOKEN not set — skipping team_rosters seed.");
-    return;
-  }
-
-  const res = await fetch(`https://api.football-data.org/v4/competitions/${COMPETITION_CODE}/teams`, {
-    headers: { "X-Auth-Token": FOOTBALL_DATA_TOKEN },
-  });
-
-  if (!res.ok) {
-    throw new Error(`football-data.org request failed: ${res.status} ${await res.text()}`);
-  }
-
-  const { teams } = await res.json();
+  const { teams } = await fetchFromFootballData("teams");
   const batch = db.batch();
 
   for (const team of teams) {
@@ -179,8 +206,15 @@ async function seedUsers() {
 }
 
 async function main() {
-  await seedMatches();
-  await seedSpecialPredictionsDeadline();
+  // js/worker-matches.mjs is a real ES module, loaded here via dynamic
+  // import() even though this script itself is CommonJS — same pattern the
+  // test suite uses to load js/*.mjs files. Keeps the stage/phase mapping
+  // in one place instead of a second copy here that could drift from it.
+  const { resolvePhase, STAGE_TO_PHASE } = await import("../js/worker-matches.mjs");
+  const trackedPhases = new Set(Object.values(STAGE_TO_PHASE));
+
+  const seededMatches = await seedMatches(resolvePhase);
+  await seedSpecialPredictionsDeadline(seededMatches, trackedPhases);
   await seedTeamRosters();
   await seedUsers();
   console.log("\nDone. Save the printed links now — tokens aren't printed again unless you add a brand-new user.");
