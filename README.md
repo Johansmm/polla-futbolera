@@ -24,19 +24,22 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
      Firebase project ID.
 
 2. **Seed the fixture and users**
-   - Edit `admin/seed.js`: fill in `MATCHES` (all matches from Round of 16 to
-     the Final, with real `kickoff_at` timestamps once known) and `USERS`
-     (the ~10 friends).
-   - `cd admin && npm install && node seed.js`
+   - Edit `admin/seed.js`: fill in `USERS` (the ~10 friends) — matches
+     themselves need no hand-typed fixture list, see below.
+   - `cd admin && npm install`
+   - `FOOTBALL_DATA_TOKEN=<your token> node seed.js` (free key from
+     [football-data.org](https://www.football-data.org/)) — **required**:
+     `seedMatches()` fetches the competition's full fixture list itself and
+     derives `match_id`/`kickoff_at`/`source_match_id` for every match
+     (team names/scores come from the Worker at read time, not from this
+     script). The same run also seeds `team_rosters/{team}` — every team's
+     squad in one API call, backing the champion/top-scorer dropdowns on
+     `special.html`.
    - The script prints each friend's `predict.html?token=...` link — save
      these, they aren't shown again unless you add a brand-new user later.
-   - Optional: run it as `FOOTBALL_DATA_TOKEN=<your token> node seed.js`
-     (free key from [football-data.org](https://www.football-data.org/)) to
-     also seed `team_rosters/{team}` — every team's squad in one API call,
-     backing the champion/top-scorer dropdowns on `special.html`.
-     Without the token this step is skipped (logged), everything else still
-     seeds normally. Only needs re-running if a squad changes materially
-     (e.g. a late injury replacement).
+   - Safe to re-run any time (e.g. once brackets update, or a squad changes
+     materially like a late injury replacement) — existing matches keep
+     their `match_id`, existing users keep their token.
 
 3. **Deploy the security rules**
    - Requires the [Firebase CLI](https://firebase.google.com/docs/cli):
@@ -45,9 +48,13 @@ match scores from the Round of 16 onward. See `CLAUDE.md` for full project conte
    - This one-time manual run is only needed for the very first deploy.
      After that, `.github/workflows/ci.yml`'s `deploy-rules` job redeploys
      `firestore.rules` automatically on every push to `main` (once tests
-     pass), using the same `FIREBASE_SERVICE_ACCOUNT_JSON` secret as the
-     other automation workflows — no more remembering to run this by hand
-     after merging a PR that touches the rules.
+     pass) — no more remembering to run this by hand after merging a PR
+     that touches the rules. This (and `automation/missing-predictions.js`'s
+     workflow) needs a repo Secret: Settings → Secrets and variables →
+     Actions → New repository secret → `FIREBASE_SERVICE_ACCOUNT_JSON`,
+     value is the **entire contents** of `admin/serviceAccountKey.json`
+     (same key used locally by `admin/seed.js`; this grants the workflows
+     the same Admin SDK access).
    - The service account behind that secret needs an extra IAM role beyond
      what the other automation workflows require: Firebase's default
      Admin SDK service account (`firebase-adminsdk-...@<project>.iam.gserviceaccount.com`,
@@ -87,7 +94,7 @@ a JRE (the emulator itself is a Java process — Node/npm alone aren't enough).
 ```
 winget install EclipseAdoptium.Temurin.21.JRE   # one-time, if `java -version` fails
 npm install                                      # root devDependencies (first time only)
-cd automation && npm install && cd ..            # sync-fixtures.js's own dependency (first time only)
+cd automation && npm install && cd ..            # automation/missing-predictions.js's own dependency (first time only)
 npm test
 ```
 
@@ -101,12 +108,10 @@ currently:
   auto-lock check (past `kickoff_at` or `locked: true`), other users'
   predictions staying hidden until a match kicks off, and
   `special_predictions` being editable only before its configured deadline.
-- `test/sync-fixtures.test.js` — plain unit tests (no emulator, no
-  credentials) for the pure decision logic in `automation/sync-fixtures.js`:
-  stage-to-phase translation, the "is this match finished yet" check, the
-  kickoff-time tolerance window used to match an API fixture to an
-  already-seeded `matches` doc, and the pending-result check that gates the
-  fast sync workflow.
+- `test/worker-matches.test.js` — plain unit tests for `js/worker-matches.mjs`'s
+  merge logic: stage-to-phase translation, the finished/live result-field
+  mapping, and matching a Firestore match to its Worker entry by
+  `source_match_id`.
 - `test/lock-logic.test.js` — plain unit tests for `js/lock-logic.mjs`'s
   timing/lookup logic (`isMatchLocked`, `isPastDeadline`, `findTeamForPlayer`),
   shared by `predict.js`, `special.js`, and `standings.js`. Loaded via dynamic
@@ -122,96 +127,22 @@ currently:
   real `.mjs` module.
 
 GitHub Actions runs the same tests (plus a `node --check` syntax pass over
-`js/*.js`, `admin/*.js`, and `automation/*.js`) on every pull request and
-push to `main` — see `.github/workflows/ci.yml`. The Actions runner already
-has Java preinstalled, so no extra setup is needed there. On push to `main`
+every `.js`/`.mjs` file in the repo) on every pull request and push to
+`main` — see `.github/workflows/ci.yml`. The Actions runner already has
+Java preinstalled, so no extra setup is needed there. On push to `main`
 specifically, a second job (`deploy-rules`) runs after tests pass and
 redeploys `firestore.rules` automatically — see "Deploy the security rules"
 above.
 
-## Automatic fixture/results sync (optional)
+## Cloudflare Worker match proxy
 
-`.github/workflows/sync-fixtures.yml` runs `automation/sync-fixtures.js` via
-two independent jobs on different schedules, pulling **all** World Cup 2026
-matches from [football-data.org](https://www.football-data.org/) and writing
-`team_a`/`team_b`/`team_a_crest_url`/`team_b_crest_url`/`kickoff_at`/`real_score_a`/`real_score_b`
-to Firestore.
-This replaces manual fixture/result entry once set up, but is optional —
-everything still works via `admin/seed.js` + the Firebase console without it.
-
-- `full-sync` runs unconditionally every 3 hours. This is the one that
-  discovers matches no one's synced before and fills in `team_a`/`team_b` as
-  the bracket resolves — there's no local state to check before calling the
-  API for that, so it always polls, but it's a single bulk request per run
-  regardless of how many matches exist, so a 3-hourly cadence is cheap.
-- `fast-sync` runs every 5 minutes, but calls `sync-fixtures.js
-  --only-if-pending`, which first checks Firestore for any match whose
-  `kickoff_at` has already passed with no `real_score_a` set yet
-  (`hasPendingResult`) and skips the football-data.org call entirely if
-  there isn't one. This is what gets a just-finished match's score into
-  Firestore within minutes instead of waiting for the next 3-hourly tick,
-  without spending extra API calls between matches.
-
-Both can also be run on-demand from the Actions tab (`workflow_dispatch`) —
-pick which one via the "Which job to run" input, which defaults to
-`full-sync`.
-
-The sync deliberately doesn't filter by stage (group stage, and the Round of
-32 that World Cup 2026's expanded format adds before Round of 16, get synced
-too) — relevance is already enforced elsewhere, so filtering here would just
-duplicate that logic:
-
-- `firestore.rules` denies any prediction write once a match's `kickoff_at`
-  has passed, so anything from an earlier stage synced mid-tournament is
-  already unwritable.
-- `js/predict.js` only ever renders matches whose `phase` is one of
-  `r16`/`qf`/`sf`/`third_place`/`final` (its `PHASE_ORDER`); any other value
-  is simply never shown, never something a user can pick to predict on.
-
-`STAGE_TO_PHASE` in the script still translates football-data.org's stage
-codes to those 5 values for the phases we care about — anything it doesn't
-recognize gets synced with its raw API stage string as `phase` instead
-(harmless: it just won't render). Before trusting the schedule, do one manual
-run from the Actions tab and check the logs for any "Unmapped stage(s)" line —
-that confirms whether football-data.org's naming matches what the script
-assumes (see the comment above `STAGE_TO_PHASE` for the English/Spanish round-
-naming mismatch this is guarding against: English "Round of 16" = Spanish
-"octavos de final", *not* "dieciseisavos"/"16avos", which is actually the
-newer Round of 32 stage).
-
-To enable them, add these two **repo Secrets** (Settings → Secrets and variables
-→ Actions → New repository secret), shared by both workflows:
-
-- `FOOTBALL_DATA_TOKEN` — a free API key from football-data.org (sign up, then
-  copy the key from your account dashboard). Verify their current docs for the
-  exact competition code/plan coverage for the World Cup before relying on it.
-- `FIREBASE_SERVICE_ACCOUNT_JSON` — paste the **entire contents** of your
-  `admin/serviceAccountKey.json` as the secret value (same key used locally by
-  `admin/seed.js`; this grants the workflow the same Admin SDK access). Also
-  required by `.github/workflows/ci.yml`'s `deploy-rules` job (not optional —
-  see the "Deploy the security rules" setup step above, including the extra
-  IAM role that job needs beyond plain Admin SDK access), so set this up even
-  if you don't want the fixture sync itself.
-
-Matches are matched to existing `matches` docs by `phase` + kickoff time
-(within a few hours' tolerance), not by team name, so pre-seeding a match's
-`kickoff_at` via `admin/seed.js` before the teams are known still lets the
-sync fill in `team_a`/`team_b` later. If no matching doc is found, it creates
-one with an auto-generated `match_id`. Once football-data.org marks a match
-`FINISHED`, its score is treated as authoritative and will overwrite
-`real_score_a`/`real_score_b` on every run — so a manual correction in the
-console could get reverted on the next sync; disable the workflow first if
-you need a manual value to stick.
-
-## Cloudflare Worker match proxy (in progress)
-
-`worker/` is a Cloudflare Worker that proxies football-data.org, part of an
-ongoing migration to a cron-free architecture: instead of a scheduled job
-writing fixture/result data into Firestore (the sync described above), the
-client will fetch match data from this Worker directly on page load. It
-exists alongside the sync for now — the remaining migration steps (seeding a
-minimal `matches` collection, updating security rules, switching the client
-over, and eventually removing the sync workflow) are still in progress.
+`worker/` is a Cloudflare Worker that proxies football-data.org. The client
+(`js/worker-matches.mjs`) fetches match data (teams, crests, live/final
+scores) from here directly on page load and merges it with Firestore's
+`matches` collection, which only ever holds `match_id`/`kickoff_at`/
+`source_match_id` — the fields security rules actually need, since rules
+can't call external APIs. This replaced a scheduled GitHub Actions job that
+used to write fixture/result data into Firestore directly.
 
 The Worker exposes one read-only route, backed by a Workers KV cache shared
 across every concurrent client so the group loading the app at once doesn't
@@ -243,11 +174,12 @@ One-time setup:
 4. `npx wrangler secret put API_KEY` from `worker/` — `API_KEY` here is the
    secret's *name* (must match `env.API_KEY` in `worker/src/index.mjs`), not
    the value. Wrangler then prompts you interactively for the value: paste
-   the same football-data.org token used by `automation/sync-fixtures.js` (see the
-   "Automatic fixture/results sync" section above for how to get one).
+   a free API key from [football-data.org](https://www.football-data.org/)
+   (sign up, then copy the key from your account dashboard — the same token
+   `admin/seed.js` uses via `FOOTBALL_DATA_TOKEN`).
 5. `npm run deploy` from `worker/` (wraps `wrangler deploy`). Wrangler prints
-   the deployed Worker's URL — that's what the client will call once it's
-   switched over to fetching match data this way.
+   the deployed Worker's URL — paste it into `js/worker-config.js`'s
+   `WORKER_URL`.
 
 `npm run dev` from `worker/` runs it locally via `wrangler dev` for testing
 against real football-data.org calls. `wrangler dev` doesn't read the secret
@@ -282,8 +214,9 @@ values of `champion_pick`/`top_scorer_pick`, so there's no code path that
 could print anyone's picks. You see who's missing something, never what
 anyone picked.
 
-Uses the same `FIREBASE_SERVICE_ACCOUNT_JSON` secret as the fixture sync — no
-extra setup needed if that's already configured.
+Uses the same `FIREBASE_SERVICE_ACCOUNT_JSON` repo Secret set up in "Deploy
+the security rules" above — no extra setup needed if that's already
+configured.
 
 To run it locally instead of via Actions (using your local
 `admin/serviceAccountKey.json` instead of the GitHub Secret):
@@ -315,18 +248,19 @@ node missing-predictions.js
   (query by `user_id` in the Console) to force every device to re-bind.
 - **Add a new user after launch**: add them to `USERS` in `admin/seed.js` and
   re-run `node seed.js` — existing users are skipped, so their tokens don't change.
-- **Add or edit matches later** (e.g. the bracket for the next phase just got
-  confirmed): add/edit entries in `MATCHES` in `admin/seed.js` and re-run
-  `node seed.js`. Safe to re-run any time — new match_ids are created, and
-  existing ones only get `phase`/`team_a`/`team_b`/`kickoff_at` refreshed;
-  `real_score_a`, `real_score_b` and `locked` are never touched once a match
-  already exists, so results you entered via the console are preserved.
+- **Pick up new or rescheduled matches later** (e.g. the bracket for the next
+  phase just got confirmed, or a kickoff time moved): just re-run
+  `FOOTBALL_DATA_TOKEN=<your token> node seed.js` — it re-fetches the
+  competition's fixture list itself, so nothing needs hand-editing. Existing
+  matches keep their `match_id`; only `kickoff_at` gets refreshed if it
+  changed.
 - **The champion/top-scorer picks deadline** (`config/special_predictions.locked_after`)
   recomputes automatically every time `node seed.js` runs, from whatever the
-  earliest Round of 16 `kickoff_at` is in `matches` at that moment — no
-  manual date entry needed. If `matches` has no `r16` docs yet when you run
-  it, this step is skipped (logged), and `special.html` stays locked by
-  default (fail-closed) until it exists.
+  earliest Round-of-16-or-later kickoff is in the fixture list it just
+  fetched — no manual date entry needed. If football-data.org hasn't
+  published any of those phases' kickoff times yet, this step is skipped
+  (logged), and `special.html` stays locked by default (fail-closed) until
+  it exists.
 - **Fix a user's name or `user_id`**: `cd admin && node rename-user.js ...`
   - `node rename-user.js name <user_id> "New Name"` — just updates the
     cosmetic `name` field (shown in `seed.js` logs and the
@@ -364,24 +298,30 @@ js/auth.js             token -> user_id resolution + anonymous-auth binding
 js/token-gate.js       shared token-resolution UI flow used by predict.js, special.js, and standings.js
 js/nav.js              shared page nav; threads ?token= through every internal link
 js/ui.js               small shared DOM helpers (status/feedback, flag imgs, date formatting)
-js/queries.js          Firestore reads shared by special.js and standings.js (deadline, rosters)
+js/queries.js          Firestore + Worker reads shared by predict.js/special.js/standings.js
+                        (matches merged with worker-matches.mjs, deadline, rosters)
+js/worker-config.js    the deployed Worker's URL (public, not a secret)
+js/worker-matches.mjs  merges a Firestore match with its Worker/football-data.org entry
 js/lock-logic.mjs      shared timing/lookup logic (isMatchLocked, isPastDeadline, findTeamForPlayer)
 js/scoring-logic.mjs   pure scoring functions (no stored points_earned — computed on read)
+js/standings-logic.mjs pure standings computation (rows, ranking, breakdown sections)
 js/predict.js          predict.html page logic
 js/special.js          special.html page logic
 js/standings.js        standings.html page logic: fetches raw predictions/picks/results and
-                        scores them client-side with js/scoring-logic.mjs
+                        scores them client-side with js/scoring-logic.mjs + js/standings-logic.mjs
 firestore.rules         security rules (see CLAUDE.md and the design notes therein)
-admin/seed.js           local-only Admin SDK script: seeds matches, users, tokens, the
-                        special_predictions deadline, and (optionally) team_rosters
+admin/seed.js           local-only Admin SDK script: derives the matches skeleton
+                        (match_id/kickoff_at/source_match_id) from football-data.org's fixture
+                        list, seeds users/tokens, the special_predictions deadline, and team_rosters
 admin/rename-user.js    local-only Admin SDK script: fixes a user's name or user_id
 scoring_config.json         tunable point/multiplier weights, read by js/scoring-logic.mjs
 test/firestore.rules.test.js   security-rules tests (run via `npm test`, needs the emulator)
 test/lock-logic.test.js        unit tests for js/lock-logic.mjs (no emulator needed)
 test/scoring-logic.test.js     unit tests for js/scoring-logic.mjs (no emulator needed)
+test/worker-matches.test.js    unit tests for js/worker-matches.mjs (no emulator needed)
+test/worker-scoring-integration.test.js  scoring-logic.mjs fed a Worker-merged match, end to end
+test/standings-logic.test.js   unit tests for js/standings-logic.mjs (no emulator needed)
 .github/workflows/ci.yml               runs the test suite on every PR / push to main
-automation/sync-fixtures.js            optional: auto-syncs fixtures/results from football-data.org
-.github/workflows/sync-fixtures.yml    runs it via 2 jobs: every 3h (unconditional) + every 5min (if pending)
 automation/missing-predictions.js          reports who's missing a pick for matches in the next 24h
 .github/workflows/missing-predictions.yml  runs automation/missing-predictions.js on demand only
 worker/src/index.mjs   Cloudflare Worker: proxies football-data.org matches via a KV cache
