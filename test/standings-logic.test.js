@@ -13,10 +13,13 @@ const DAY = 24 * 60 * 60 * 1000;
 let mergeMatchData;
 let selectScorableMatches;
 let computeStandingsFromData;
+let hasMatchNeedingRefresh;
+let selectNewlyScorableMatches;
 
 test.before(async () => {
   ({ mergeMatchData } = await import("../js/worker-matches.mjs"));
-  ({ selectScorableMatches, computeStandingsFromData } = await import("../js/standings-logic.mjs"));
+  ({ selectScorableMatches, computeStandingsFromData, hasMatchNeedingRefresh, selectNewlyScorableMatches } =
+    await import("../js/standings-logic.mjs"));
 });
 
 const SCORING_CONFIG = {
@@ -177,4 +180,53 @@ test("computeStandingsFromData marks a scorable match with no prediction as a mi
   assert.equal(alice.matchPoints, 0);
   assert.equal(alice.matchBreakdown.r16_01.points, 0);
   assert.equal(result.specialSections.length, 0);
+});
+
+// hasMatchNeedingRefresh backs standings.js's poll loop: a network-free
+// check deciding whether a Worker refetch is even worth doing.
+test("hasMatchNeedingRefresh is false when nothing has kicked off yet", () => {
+  const { upcomingR16 } = buildScenario();
+  assert.equal(hasMatchNeedingRefresh([upcomingR16]), false);
+});
+
+test("hasMatchNeedingRefresh is true for a match that's kicked off with no result yet", () => {
+  const live = mergeMatchData(
+    { id: "r16_03", match_id: "r16_03", kickoff_at: new Date(Date.now() - DAY), source_match_id: 4 },
+    toSourceMap([
+      {
+        id: 4,
+        stage: "LAST_16",
+        status: "IN_PLAY",
+        homeTeam: { name: "France", crest: null },
+        awayTeam: { name: "Germany", crest: null },
+        score: { fullTime: { home: 1, away: 0 } },
+      },
+    ])
+  );
+  assert.equal(hasMatchNeedingRefresh([live]), true);
+});
+
+test("hasMatchNeedingRefresh is false once every kicked-off match has a real score", () => {
+  const { finishedR16 } = buildScenario();
+  assert.equal(hasMatchNeedingRefresh([finishedR16]), false);
+});
+
+// selectNewlyScorableMatches backs the poll loop's one-time-per-match
+// predictions fetch for matches that just crossed into "locked".
+test("selectNewlyScorableMatches returns only scorable matches not already fetched", () => {
+  const { finishedR16, upcomingR16, final } = buildScenario();
+  const matches = [finishedR16, upcomingR16, final];
+  const alreadyFetched = new Set(["r16_01"]);
+  const newlyLocked = selectNewlyScorableMatches(matches, SCORING_CONFIG, alreadyFetched);
+  assert.deepEqual(
+    newlyLocked.map((m) => m.id),
+    ["final_01"]
+  );
+});
+
+test("selectNewlyScorableMatches returns nothing once everything scorable is already fetched", () => {
+  const { finishedR16, final } = buildScenario();
+  const alreadyFetched = new Set(["r16_01", "final_01"]);
+  const newlyLocked = selectNewlyScorableMatches([finishedR16, final], SCORING_CONFIG, alreadyFetched);
+  assert.deepEqual(newlyLocked, []);
 });

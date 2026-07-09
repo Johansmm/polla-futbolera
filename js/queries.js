@@ -31,16 +31,23 @@ export async function fetchUserName(userId) {
   return snap.exists() ? snap.data().name : null;
 }
 
-async function fetchFirestoreMatches() {
+// Exported on its own (not just via fetchMatches below) so standings.js's
+// poll loop can fetch this once and keep it in memory, re-merging it with
+// fresh fetchWorkerMatches() calls on every tick instead of re-reading
+// Firestore's matches collection each time.
+export async function fetchFirestoreMatches() {
   const snap = await getDocs(query(collection(db, "matches"), orderBy("kickoff_at")));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+// Exported on its own (not just via fetchMatches below) so standings.js's
+// poll loop can refetch just this — the Worker's cached route — on every
+// tick without touching Firestore at all.
 // Failures here (network, Worker down) resolve to an empty list rather than
 // throwing — team names/scores just stay blank, same as a match whose
 // source_match_id hasn't resolved yet. Predictions/standings don't depend on
 // the Worker at all, so a hiccup here shouldn't block the rest of the page.
-async function fetchWorkerMatches() {
+export async function fetchWorkerMatches() {
   try {
     const res = await fetch(`${WORKER_URL}/matches`);
     if (!res.ok) return [];
