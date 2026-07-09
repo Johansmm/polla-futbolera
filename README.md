@@ -19,7 +19,7 @@ sequenceDiagram
     Note over Client,API: Every page load
     Client->>Firestore: read matches (skeleton) + predictions
     Client->>Worker: GET /matches
-    Worker->>API: fetch (skipped if cached, TTL 60s)
+    Worker->>API: fetch (skipped if cached, TTL 15s)
     Worker-->>Client: teams, crests, live/final scores
     Note over Client: merge + compute points client-side — nothing server-side
 
@@ -257,14 +257,15 @@ multiply real football-data.org calls:
 
 - `GET /matches` → every World Cup match in one response — scheduled
   fixtures, in-progress scores, and finished results alike, exactly as
-  football-data.org returns them — cached 60s, which keeps a live match's
-  score reasonably fresh without approaching the free tier's 10 calls/min
-  limit (60s cache ≈ 1 call/min)
+  football-data.org returns them — cached 15s, close to `standings.html`'s
+  own 10s poll interval so a live score reaches clients about as fresh as
+  they ask for it, without approaching the free tier's 10 calls/min limit
+  (15s cache ≈ 4 calls/min)
 
 Alongside that short-lived cache entry, the Worker keeps a second,
 non-expiring KV entry holding the last successful upstream response. If a
 real call to football-data.org fails (thrown network error or a non-ok
-status) after the 60s cache has expired, the Worker serves that stale entry
+status) after the 15s cache has expired, the Worker serves that stale entry
 instead of a bare error, so a temporary upstream outage doesn't blank out
 match data for the group — the response carries an `X-Cache-Status: stale`
 header so a future client-side change could surface "data might be

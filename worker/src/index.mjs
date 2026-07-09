@@ -12,10 +12,10 @@ import { FOOTBALL_DATA_BASE_URL, COMPETITION_CODE } from "../../js/football-data
 // TTL. A single fixed TTL per route (rather than branching per-match on
 // live/finished/upcoming) keeps the cache key trivial — one entry per route,
 // shared by every client — while still cutting real API calls to roughly
-// 1/minute, well under the free tier's 10/min limit no matter how many
+// 4/minute, well under the free tier's 10/min limit no matter how many
 // clients have the page open at once.
 export const ROUTES = {
-  "/matches": { upstreamPath: "matches", ttlSeconds: 60 },
+  "/matches": { upstreamPath: "matches", ttlSeconds: 15 },
 };
 
 const CORS_HEADERS = {

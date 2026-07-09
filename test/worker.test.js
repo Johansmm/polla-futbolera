@@ -35,7 +35,7 @@ function fakeCache(initial = {}) {
 }
 
 test("resolveRoute recognizes the exposed route and rejects anything else", () => {
-  assert.deepEqual(resolveRoute("/matches"), { upstreamPath: "matches", ttlSeconds: 60 });
+  assert.deepEqual(resolveRoute("/matches"), { upstreamPath: "matches", ttlSeconds: 15 });
   assert.equal(resolveRoute("/scorers"), undefined);
   assert.equal(resolveRoute("/"), undefined);
 });
