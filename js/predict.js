@@ -1,17 +1,9 @@
-import {
-  collection,
-  getDocs,
-  doc,
-  getDoc,
-  setDoc,
-  query,
-  orderBy,
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
 import { showStatus, showRetry, showSignedInName, formatKickoff, teamFlagImg } from "./ui.js";
 import { isMatchLocked } from "./lock-logic.mjs";
-import { fetchUserName } from "./queries.js";
+import { fetchUserName, fetchMatches } from "./queries.js";
 
 const PHASE_LABELS = {
   r16: "Round of 16",
@@ -29,11 +21,6 @@ const formEl = document.getElementById("predictions-form");
 // Match ids with edits not yet saved — each row saves individually, so
 // leaving the page mid-entry silently discards anything typed but unsaved.
 const dirtyMatches = new Set();
-
-async function fetchMatches() {
-  const snap = await getDocs(query(collection(db, "matches"), orderBy("kickoff_at")));
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-}
 
 async function fetchPredictions(userId, matches) {
   const entries = await Promise.all(
