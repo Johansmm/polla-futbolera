@@ -39,6 +39,8 @@ async function seed(setupFn) {
   });
 }
 
+// No `locked` field — matchDeadlinePassed() derives locking purely from
+// kickoff_at, so a real match doc never carries one.
 function futureMatch(overrides = {}) {
   return {
     match_id: "r16_01",
@@ -48,7 +50,6 @@ function futureMatch(overrides = {}) {
     kickoff_at: new Date(Date.now() + HOUR),
     real_score_a: null,
     real_score_b: null,
-    locked: false,
     ...overrides,
   };
 }
@@ -148,10 +149,9 @@ test("reading your own not-yet-created prediction succeeds (regression: resource
   await assertSucceeds(johan.collection("predictions").doc("johan_r16_01").get());
 });
 
-test("writes are rejected once a match is past kickoff or force-locked", async () => {
+test("prediction create is rejected once a match's kickoff time has passed", async () => {
   await seed(async (db) => {
     await db.collection("matches").doc("r16_01").set(futureMatch({ kickoff_at: new Date(Date.now() - HOUR) }));
-    await db.collection("matches").doc("r16_02").set(futureMatch({ match_id: "r16_02", locked: true }));
     await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
   });
 
@@ -166,14 +166,32 @@ test("writes are rejected once a match is past kickoff or force-locked", async (
       predicted_score_b: 1,
     })
   );
+});
 
-  await assertFails(
-    johan.collection("predictions").doc("johan_r16_02").set({
-      prediction_id: "johan_r16_02",
+test("a match with no locked field at all still locks purely from kickoff_at", async () => {
+  await seed(async (db) => {
+    await db.collection("matches").doc("r16_01").set(futureMatch());
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  await assertSucceeds(
+    johan.collection("predictions").doc("johan_r16_01").set({
+      prediction_id: "johan_r16_01",
       user_id: "johan",
-      match_id: "r16_02",
+      match_id: "r16_01",
       predicted_score_a: 1,
       predicted_score_b: 1,
+    })
+  );
+
+  await seed((db) => db.collection("matches").doc("r16_01").update({ kickoff_at: new Date(Date.now() - HOUR) }));
+
+  await assertFails(
+    johan.collection("predictions").doc("johan_r16_01").update({
+      predicted_score_a: 2,
+      predicted_score_b: 2,
     })
   );
 });
