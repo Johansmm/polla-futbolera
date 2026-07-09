@@ -16,9 +16,9 @@ jobs:
         with:
           node-version: 20
 
-      - name: Syntax-check frontend and admin scripts
+      - name: Syntax-check all JS/MJS files
         run: |
-          for f in js/*.js js/*.mjs admin/*.js automation/*.js; do
+          find . -type d \( -name node_modules -o -name .git \) -prune -o -type f \( -name '*.js' -o -name '*.mjs' \) -print | sort | while read -r f; do
             echo "Checking $f"
             node --check "$f"
           done
