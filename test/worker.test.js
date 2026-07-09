@@ -78,9 +78,9 @@ test("fetchFromCacheOrUpstream calls upstream and populates the cache on a miss"
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://api.football-data.org/v4/competitions/WC/matches");
   assert.equal(calls[0].opts.headers["X-Auth-Token"], "test-api-key");
-  assert.equal(cache.puts.length, 1);
-  assert.equal(cache.puts[0].value, '{"fresh":true}');
-  assert.equal(cache.puts[0].opts.expirationTtl, 60);
+  const shortTtlPut = cache.puts.find((p) => p.key === "matches");
+  assert.equal(shortTtlPut.value, '{"fresh":true}');
+  assert.equal(shortTtlPut.opts.expirationTtl, 60);
 });
 
 test("fetchFromCacheOrUpstream passes through a failed upstream response without caching it", async () => {
@@ -101,6 +101,40 @@ test("fetchFromCacheOrUpstream returns a 502 with CORS-able JSON when the networ
   const body = JSON.parse(await res.text());
   assert.match(body.error, /ENOTFOUND/);
   assert.equal(cache.puts.length, 0);
+});
+
+test("fetchFromCacheOrUpstream populates the stale fallback key alongside the short-TTL cache on success", async () => {
+  const cache = fakeCache();
+  const fetchUpstream = async () => new Response('{"fresh":true}', { status: 200 });
+  await fetchFromCacheOrUpstream({ upstreamPath: "matches", ttlSeconds: 60 }, "key", cache, fetchUpstream);
+  assert.equal(cache.puts.length, 2);
+  assert.deepEqual(
+    cache.puts.map((p) => p.key).sort(),
+    ["matches", "matches:stale"]
+  );
+  const stalePut = cache.puts.find((p) => p.key === "matches:stale");
+  assert.equal(stalePut.value, '{"fresh":true}');
+  assert.equal(stalePut.opts, undefined);
+});
+
+test("fetchFromCacheOrUpstream falls back to stale data instead of erroring when the network call throws", async () => {
+  const cache = fakeCache({ "matches:stale": '{"stale":true}' });
+  const fetchUpstream = async () => {
+    throw new Error("getaddrinfo ENOTFOUND api.football-data.org");
+  };
+  const res = await fetchFromCacheOrUpstream({ upstreamPath: "matches", ttlSeconds: 60 }, "key", cache, fetchUpstream);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), '{"stale":true}');
+  assert.equal(res.headers.get("X-Cache-Status"), "stale");
+});
+
+test("fetchFromCacheOrUpstream falls back to stale data instead of erroring on a failed upstream response", async () => {
+  const cache = fakeCache({ "matches:stale": '{"stale":true}' });
+  const fetchUpstream = async () => new Response('{"error":"rate limited"}', { status: 429 });
+  const res = await fetchFromCacheOrUpstream({ upstreamPath: "matches", ttlSeconds: 60 }, "key", cache, fetchUpstream);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), '{"stale":true}');
+  assert.equal(res.headers.get("X-Cache-Status"), "stale");
 });
 
 test("handleRequest answers CORS preflight requests", async () => {

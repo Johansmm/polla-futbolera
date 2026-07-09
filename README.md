@@ -261,6 +261,18 @@ multiply real football-data.org calls:
   score reasonably fresh without approaching the free tier's 10 calls/min
   limit (60s cache ≈ 1 call/min)
 
+Alongside that short-lived cache entry, the Worker keeps a second,
+non-expiring KV entry holding the last successful upstream response. If a
+real call to football-data.org fails (thrown network error or a non-ok
+status) after the 60s cache has expired, the Worker serves that stale entry
+instead of a bare error, so a temporary upstream outage doesn't blank out
+match data for the group — the response carries an `X-Cache-Status: stale`
+header so a future client-side change could surface "data might be
+outdated" if wanted. That fallback entry only updates when a real upstream
+call is triggered by a request arriving after the short-lived cache
+expired, not proactively on a timer, so during a quiet period it could be
+more than a few minutes stale by the time it's actually needed.
+
 `standings.html` polls this route every 10s (`js/standings.js`'s
 `POLL_INTERVAL_MS`) while some match has kicked off without a final result
 yet, so a client with the page already open sees a live score, provisional
