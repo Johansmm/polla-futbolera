@@ -57,20 +57,28 @@ export function computeStandingsFromData({
   const semifinalists = deriveSemifinalists(matches);
   const topScorer = tournamentResults?.top_scorer ?? null;
 
+  // isMatchLive/effectiveScore only depend on the match itself, not on
+  // which user's row is being built — computed once per match here rather
+  // than once per (user, match) pair below, and reused again in
+  // matchSections further down instead of a third recompute.
+  const matchContext = new Map(
+    scorableMatches.map((match) => [match.id, { live: isMatchLive(match), effective: effectiveScore(match) }])
+  );
+
   const rows = users.map((user) => {
     let matchPoints = 0;
     let exactHits = 0;
     let predictionsSubmitted = 0;
-    const matchBreakdown = [];
+    const matchBreakdown = {};
 
     for (const match of scorableMatches) {
       const prediction = predictionsByMatch[match.id]?.[user.user_id];
       if (prediction) predictionsSubmitted += 1;
 
-      const live = isMatchLive(match);
+      const { live, effective } = matchContext.get(match.id);
       const { points, exactScoreHit } = scoreMatchBreakdown(
         prediction,
-        effectiveScore(match),
+        effective,
         finishedIds.has(match.id) || live,
         scoringConfig.match_outcome_points,
         scoringConfig.phase_multipliers[match.phase]
@@ -78,7 +86,7 @@ export function computeStandingsFromData({
 
       if (points !== null) matchPoints += points;
       if (exactScoreHit) exactHits += 1;
-      matchBreakdown.push({ match, prediction: prediction ?? null, points });
+      matchBreakdown[match.id] = { match, prediction: prediction ?? null, points };
     }
 
     const pick = specialPicks[user.user_id];
@@ -135,7 +143,7 @@ export function computeStandingsFromData({
   const matchSections = [...scorableMatches]
     .sort((a, b) => kickoffDate(b) - kickoffDate(a))
     .map((match) => {
-      const live = isMatchLive(match);
+      const { live } = matchContext.get(match.id);
       const scoreTag =
         match.real_score_a != null && match.real_score_b != null
           ? ` · Final ${match.real_score_a}–${match.real_score_b}`
@@ -145,7 +153,7 @@ export function computeStandingsFromData({
       const liveBadge = live ? ` <span class="live-badge">🔴 Live</span>` : "";
 
       const rawEntries = rows.map((row) => {
-        const breakdown = row.matchBreakdown.find((b) => b.match.id === match.id);
+        const breakdown = row.matchBreakdown[match.id];
         const prediction = breakdown?.prediction
           ? `${breakdown.prediction.predicted_score_a}–${breakdown.prediction.predicted_score_b}`
           : "—";

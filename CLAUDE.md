@@ -2,11 +2,29 @@
 
 ## Goal
 
-Build a web app for a private group of ~10 friends to predict World Cup 2026
-match scores from the Round of 16 onward (Round of 16, Quarterfinals,
-Semifinals, Third Place, Final). No real-money handling inside the app — the
-prize pool split is managed separately by the organizer. The app only needs
-to track predictions and, eventually, compute standings.
+Build a web app for a small private group of clients, based in different
+European countries (relevant to `js/ui.js`'s time formatting — no single
+fixed timezone to assume), to predict World Cup 2026 match scores from the
+Round of 16 onward (Round of 16, Quarterfinals, Semifinals, Third Place,
+Final). No real-money handling inside the app — the prize pool split is
+managed separately by the organizer. The app only needs to track
+predictions and, eventually, compute standings. The group's actual size
+isn't a technical constraint anywhere in this design (Firestore, the
+Worker's shared KV cache, and the client-side scoring/standings math all
+scale well past a small group) — it's just the intended audience.
+
+## Architecture
+
+See `README.md`'s "How it works" section (sequence diagram included) for
+the full request flow and "Project structure" for what's in each folder. In
+short: `admin/seed.js` — run by Johan, the organizer and the app's only
+admin — seeds a minimal `matches` skeleton
+(`match_id`/`kickoff_at`/`source_match_id`) plus users/tokens/rosters; the
+client merges that with live match data from a Cloudflare Worker proxying
+football-data.org on every page load; predictions are written directly
+client → Firestore, gated by `firestore.rules`. Nothing about a match's
+teams/scores, and nothing about anyone's points, is ever stored — both are
+computed at read time.
 
 ## Priority for MVP (do this first)
 
@@ -16,20 +34,22 @@ to track predictions and, eventually, compute standings.
    `predicted_score_a` / `predicted_score_b`
 4. Auto-lock a match's predictions at kickoff time (no edits after)
 
-Explicitly deprioritized for now (build later, don't block on this):
-- Scoring/points calculation
-- Standings dashboard
-- Discord bot integration (planned as a second, parallel input channel later
-  — same backend, same `user_id`, just another client)
-- ~~Automatic fixture/results fetching~~ — implemented (optional, doesn't
-  block manual entry) in `automation/sync-fixtures.js` +
-  `.github/workflows/sync-fixtures.yml`: a scheduled GitHub Action hitting
-  football-data.org, writing fixture/result updates to Firestore via the
-  Admin SDK (service account key stored as a GitHub Secret). Stays 100% free
-  since the cron runs on GitHub, not Firebase — no Blaze/Cloud Functions
-  needed. See [issue #2](https://github.com/Johansmm/polla-futbolera/issues/2)
-  for the rationale and `README.md`'s "Automatic fixture/results sync"
-  section for setup.
+Originally deprioritized, since built:
+- ~~Scoring/points calculation~~ — `js/scoring-logic.mjs`, computed on the
+  fly, never stored (see "Scoring rules" below).
+- ~~Standings dashboard~~ — `standings.html` + `js/standings-logic.mjs`.
+- ~~Automatic fixture/results fetching~~ — implemented via a Cloudflare
+  Worker (`worker/`) proxying football-data.org, cron-free: the client
+  (`js/worker-matches.mjs`) fetches match data straight from it on page
+  load and merges it with Firestore's minimal `matches` collection
+  (`match_id`/`kickoff_at`/`source_match_id` only). Stays 100% free — see
+  `README.md`'s "Cloudflare Worker match proxy" section for setup. A GitHub
+  Actions cron writing fixture/result data into Firestore directly used to
+  do this job instead; removed once the Worker replaced it entirely.
+
+Still deprioritized:
+- Discord bot integration (planned as a second, parallel input channel
+  later — same backend, same `user_id`, just another client)
 
 ## Tech stack decisions
 
@@ -43,7 +63,7 @@ Explicitly deprioritized for now (build later, don't block on this):
 - Security rules (Firestore rules, not app code) must enforce:
   - A user can only write to their own predictions (matched by token → user_id)
   - Predictions from other users are hidden until the match's kickoff time
-  - No writes allowed to a match after `locked = true`
+  - No writes allowed to a match's predictions once its `kickoff_at` has passed
 
 ## Code conventions
 
@@ -68,14 +88,17 @@ Explicitly deprioritized for now (build later, don't block on this):
 ### `matches`
 | Field | Type | Notes |
 |---|---|---|
-| `match_id` | string | e.g. `r16_01` |
-| `phase` | string | `r16`, `qf`, `sf`, `third_place`, `final` |
-| `team_a` / `team_b` | string | Filled in once bracket is known |
-| `team_a_crest_url` / `team_b_crest_url` | string\|null | Flag/crest image URL, synced from the same source as `team_a`/`team_b` — display-only, never derived or looked up client-side |
-| `kickoff_at` | timestamp | Used to auto-lock predictions |
-| `real_score_a` / `real_score_b` | number\|null | Filled by admin after the match |
-| `live_score_a` / `live_score_b` | number\|null | Written by `sync-fixtures.js` while the match is `IN_PLAY`/`PAUSED`, cleared to `null` once `real_score_a`/`real_score_b` are set at `FINISHED`. Never authoritative — `real_score_a`/`real_score_b` win once set |
-| `locked` | boolean | Auto-true after kickoff |
+| `match_id` | string | e.g. `r16_01` — this project's own id, independent of whatever match-data source is behind the Worker; derived from the competition's phase + kickoff order (see `admin/seed.js`), never re-derived once assigned |
+| `kickoff_at` | timestamp | Used to auto-lock predictions — the only reason this collection exists in Firestore at all, since security rules can't call external APIs |
+| `source_match_id` | number | The match-data source's own id for this fixture (e.g. football-data.org's numeric match id), used to look up the corresponding entry in the Worker's response. Deliberately not named after the source itself — a future source change only means updating the value, not every reference to the field's name |
+
+Everything else about a match — `phase`, `team_a`/`team_b`, crest URLs,
+`real_score_a`/`real_score_b`, `live_score_a`/`live_score_b` — comes from
+the Cloudflare Worker proxy at read time, merged in by
+`js/worker-matches.mjs`; none of it is stored in Firestore. `locked` isn't
+stored either: `firestore.rules`' `matchDeadlinePassed()` and
+`js/lock-logic.mjs`'s `isMatchLocked()` both derive it purely from
+`kickoff_at`.
 
 ### `predictions`
 | Field | Type | Notes |
@@ -220,7 +243,7 @@ live score instead, via `scoring-logic.mjs`'s `isMatchLive`/`effectiveScore`
   missing the full custom scoring formula.
 - **WhatsApp bot (official Cloud API)**: sandbox test mode caps broadcasts at
   5 recipients (group is ~10 people), so it requires Meta business
-  verification — too much overhead for a friends' pool.
+  verification — too much overhead for this small a pool.
 - **Superchat (WhatsApp BSP)**: free tier covers 30 contacts, but still
   requires Meta business verification underneath. Same overhead, not worth it.
 - **whatsapp-web.js (unofficial)**: risk of Meta banning the number for
@@ -231,17 +254,5 @@ live score instead, via `scoring-logic.mjs`'s `isMatchLive`/`effectiveScore`
 
 ## Not yet defined (decide during implementation, don't block on upfront spec)
 
-- **Admin panel**: how Johan will load the real fixture (team_a/team_b once
-  brackets are known), enter real match results, and generate/regenerate
-  user tokens. Could be a protected view in the same app, or direct edits in
-  the Firestore console — decide based on how often this needs to happen.
-- **Deploy**: repo structure, Firebase project setup, GitHub Pages config.
 - **Discord bot integration**: separate client writing to the same
   `predictions` collection — deferred until the web MVP is working.
-
-## Group context
-
-- ~10 friends, based in different European countries
-- Organizer (Johan) acts as admin: creates users, generates/regenerates
-  tokens, enters real match results after each game
-- No in-app money handling — prize split (1st/2nd/3rd) happens outside the app

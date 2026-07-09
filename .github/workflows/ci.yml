@@ -58,7 +58,7 @@ jobs:
         run: npm install
         working-directory: automation
 
-      - name: Run tests (Firestore rules + sync-fixtures pure logic)
+      - name: Run tests (Firestore rules + pure logic modules)
         run: npm test
 
   deploy-rules:

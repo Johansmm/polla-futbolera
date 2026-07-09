@@ -53,5 +53,8 @@ async function fetchWorkerMatches() {
 
 export async function fetchMatches() {
   const [firestoreMatches, workerMatches] = await Promise.all([fetchFirestoreMatches(), fetchWorkerMatches()]);
-  return firestoreMatches.map((match) => mergeMatchData(match, workerMatches));
+  // Built once and reused for every Firestore match, rather than making
+  // mergeMatchData scan the whole Worker response again each time.
+  const workerMatchesById = new Map(workerMatches.map((m) => [m.id, m]));
+  return firestoreMatches.map((match) => mergeMatchData(match, workerMatchesById));
 }

@@ -85,7 +85,7 @@ export async function signInWithToken(token) {
 /**
  * Signs out the current anonymous session and starts a fresh one, so this
  * device can be (re)bound to a different user_id — e.g. a shared computer
- * previously used by another friend.
+ * previously used by another client.
  */
 export async function switchAccount(token) {
   await signOut(auth);

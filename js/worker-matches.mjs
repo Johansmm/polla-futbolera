@@ -55,18 +55,17 @@ export function buildLiveScoreFields(apiMatch) {
   return {};
 }
 
-export function findSourceMatch(sourceMatches, sourceMatchId) {
-  return sourceMatches.find((m) => m.id === sourceMatchId);
-}
-
 // firestoreMatch's own match_id/kickoff_at/source_match_id always win over
 // anything derived here — Firestore is authoritative for the fields
 // security rules depend on; the source only ever supplies display data. If
 // no corresponding source match is found (source_match_id not resolved yet,
 // or the Worker call failed), returns firestoreMatch unchanged — no team,
 // score, or phase fields, same as any other match still waiting on data.
-export function mergeMatchData(firestoreMatch, sourceMatches) {
-  const apiMatch = findSourceMatch(sourceMatches, firestoreMatch.source_match_id);
+// sourceMatchesById is a Map keyed by the source's own match id (built once
+// per fetch by the caller), so this is an O(1) lookup rather than an O(n)
+// scan repeated for every Firestore match.
+export function mergeMatchData(firestoreMatch, sourceMatchesById) {
+  const apiMatch = sourceMatchesById.get(firestoreMatch.source_match_id);
   if (!apiMatch) return { ...firestoreMatch };
 
   return {

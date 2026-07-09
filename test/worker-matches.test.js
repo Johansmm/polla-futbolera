@@ -8,14 +8,20 @@ const assert = require("node:assert/strict");
 let resolvePhase;
 let buildResultFields;
 let buildLiveScoreFields;
-let findSourceMatch;
 let mergeMatchData;
 
 test.before(async () => {
-  ({ resolvePhase, buildResultFields, buildLiveScoreFields, findSourceMatch, mergeMatchData } = await import(
+  ({ resolvePhase, buildResultFields, buildLiveScoreFields, mergeMatchData } = await import(
     "../js/worker-matches.mjs"
   ));
 });
+
+// mergeMatchData takes a Map keyed by the source's own match id (see its
+// own comment for why) — this builds one from a plain array of fixtures,
+// the shape that's easiest to write test data as.
+function toSourceMap(matches) {
+  return new Map(matches.map((m) => [m.id, m]));
+}
 
 test("resolvePhase translates the five knockout stages this project cares about", () => {
   assert.equal(resolvePhase("LAST_16"), "r16");
@@ -87,23 +93,14 @@ test("buildLiveScoreFields clears the live score once the match is finished", ()
   assert.deepEqual(buildLiveScoreFields(apiMatch), { live_score_a: null, live_score_b: null });
 });
 
-test("findSourceMatch finds the entry with a matching id", () => {
-  const sourceMatches = [{ id: 1 }, { id: 2 }, { id: 3 }];
-  assert.equal(findSourceMatch(sourceMatches, 2), sourceMatches[1]);
-});
-
-test("findSourceMatch returns undefined when nothing matches", () => {
-  assert.equal(findSourceMatch([{ id: 1 }], 999), undefined);
-});
-
 test("mergeMatchData returns the Firestore match unchanged when no source match is found", () => {
   const firestoreMatch = { id: "r16_01", match_id: "r16_01", kickoff_at: "2026-07-04T19:00:00Z", source_match_id: 42 };
-  assert.deepEqual(mergeMatchData(firestoreMatch, []), firestoreMatch);
+  assert.deepEqual(mergeMatchData(firestoreMatch, new Map()), firestoreMatch);
 });
 
 test("mergeMatchData merges team, crest, and phase fields for a scheduled match", () => {
   const firestoreMatch = { match_id: "r16_01", kickoff_at: "2026-07-04T19:00:00Z", source_match_id: 42 };
-  const sourceMatches = [
+  const sourceMatches = toSourceMap([
     {
       id: 42,
       stage: "LAST_16",
@@ -112,7 +109,7 @@ test("mergeMatchData merges team, crest, and phase fields for a scheduled match"
       awayTeam: { name: "Morocco", crest: "https://crests/morocco.svg" },
       score: { fullTime: { home: null, away: null } },
     },
-  ];
+  ]);
 
   assert.deepEqual(mergeMatchData(firestoreMatch, sourceMatches), {
     match_id: "r16_01",
@@ -128,7 +125,7 @@ test("mergeMatchData merges team, crest, and phase fields for a scheduled match"
 
 test("mergeMatchData merges the live score for a match in progress", () => {
   const firestoreMatch = { match_id: "r16_01", kickoff_at: "2026-07-04T19:00:00Z", source_match_id: 42 };
-  const sourceMatches = [
+  const sourceMatches = toSourceMap([
     {
       id: 42,
       stage: "LAST_16",
@@ -137,7 +134,7 @@ test("mergeMatchData merges the live score for a match in progress", () => {
       awayTeam: { name: "Morocco", crest: null },
       score: { fullTime: { home: 1, away: 0 } },
     },
-  ];
+  ]);
 
   const merged = mergeMatchData(firestoreMatch, sourceMatches);
   assert.equal(merged.live_score_a, 1);
@@ -147,7 +144,7 @@ test("mergeMatchData merges the live score for a match in progress", () => {
 
 test("mergeMatchData merges the final result for a finished match", () => {
   const firestoreMatch = { match_id: "r16_01", kickoff_at: "2026-07-04T19:00:00Z", source_match_id: 42 };
-  const sourceMatches = [
+  const sourceMatches = toSourceMap([
     {
       id: 42,
       stage: "LAST_16",
@@ -156,7 +153,7 @@ test("mergeMatchData merges the final result for a finished match", () => {
       awayTeam: { name: "Morocco", crest: null },
       score: { duration: "REGULAR", fullTime: { home: 2, away: 1 } },
     },
-  ];
+  ]);
 
   const merged = mergeMatchData(firestoreMatch, sourceMatches);
   assert.equal(merged.real_score_a, 2);

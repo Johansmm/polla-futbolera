@@ -28,6 +28,13 @@ const MATCH_OUTCOME_POINTS = {
   miss: 0,
 };
 
+// mergeMatchData takes a Map keyed by the source's own match id — this
+// builds one from a plain array of fixtures, the shape that's easiest to
+// write test data as.
+function toSourceMap(matches) {
+  return new Map(matches.map((m) => [m.id, m]));
+}
+
 test("a finished match merged from the Worker scores an exact hit correctly", () => {
   const firestoreMatch = {
     id: "r16_01",
@@ -35,7 +42,7 @@ test("a finished match merged from the Worker scores an exact hit correctly", ()
     kickoff_at: new Date("2026-07-04T19:00:00Z"),
     source_match_id: 498001,
   };
-  const sourceMatches = [
+  const sourceMatches = toSourceMap([
     {
       id: 498001,
       stage: "LAST_16",
@@ -44,7 +51,7 @@ test("a finished match merged from the Worker scores an exact hit correctly", ()
       awayTeam: { name: "Morocco", crest: null },
       score: { duration: "REGULAR", fullTime: { home: 2, away: 1 } },
     },
-  ];
+  ]);
 
   const match = mergeMatchData(firestoreMatch, sourceMatches);
   assert.equal(match.phase, "r16");
@@ -75,7 +82,7 @@ test("a live match merged from the Worker sources provisional points from the li
     kickoff_at: new Date("2026-07-04T19:00:00Z"),
     source_match_id: 498002,
   };
-  const sourceMatches = [
+  const sourceMatches = toSourceMap([
     {
       id: 498002,
       stage: "LAST_16",
@@ -84,7 +91,7 @@ test("a live match merged from the Worker sources provisional points from the li
       awayTeam: { name: "France", crest: null },
       score: { fullTime: { home: 1, away: 0 } },
     },
-  ];
+  ]);
 
   const match = mergeMatchData(firestoreMatch, sourceMatches);
   assert.equal(match.live_score_a, 1);
@@ -113,7 +120,7 @@ test("a scheduled match merged from the Worker is pending, not a miss", () => {
     kickoff_at: new Date("2026-07-05T19:00:00Z"),
     source_match_id: 498003,
   };
-  const sourceMatches = [
+  const sourceMatches = toSourceMap([
     {
       id: 498003,
       stage: "LAST_16",
@@ -122,7 +129,7 @@ test("a scheduled match merged from the Worker is pending, not a miss", () => {
       awayTeam: { name: "Japan", crest: null },
       score: { fullTime: { home: null, away: null } },
     },
-  ];
+  ]);
 
   const match = mergeMatchData(firestoreMatch, sourceMatches);
   assert.equal(isMatchLive(match), false);
@@ -142,7 +149,7 @@ test("a scheduled match merged from the Worker is pending, not a miss", () => {
 test("deriveChampion and deriveSemifinalists work off Worker-merged team names", () => {
   const final = mergeMatchData(
     { match_id: "final_01", source_match_id: 1 },
-    [
+    toSourceMap([
       {
         id: 1,
         stage: "FINAL",
@@ -151,11 +158,11 @@ test("deriveChampion and deriveSemifinalists work off Worker-merged team names",
         awayTeam: { name: "Brazil", crest: null },
         score: { duration: "REGULAR", fullTime: { home: 2, away: 0 } },
       },
-    ]
+    ])
   );
   const semifinal = mergeMatchData(
     { match_id: "sf_01", source_match_id: 2 },
-    [
+    toSourceMap([
       {
         id: 2,
         stage: "SEMI_FINALS",
@@ -164,7 +171,7 @@ test("deriveChampion and deriveSemifinalists work off Worker-merged team names",
         awayTeam: { name: "France", crest: null },
         score: { duration: "REGULAR", fullTime: { home: 3, away: 1 } },
       },
-    ]
+    ])
   );
 
   const matches = [final, semifinal];

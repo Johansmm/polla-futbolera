@@ -90,8 +90,9 @@ export function calculateTopScorerPoints(
   return points;
 }
 
-// A match is "live" once sync-fixtures.js has a running score for it but no
-// admin-entered final result yet — real_score_a/b always win once set.
+// A match is "live" once js/worker-matches.mjs has merged in a running
+// score for it but no admin-entered final result yet — real_score_a/b
+// always win once set.
 export function isMatchLive(match) {
   return match.live_score_a != null && match.real_score_a == null;
 }
