@@ -68,6 +68,7 @@ function samplePick(overrides = {}) {
     user_id: "johan",
     champion_pick: "Argentina",
     top_scorer_pick: "Messi",
+    top_scorer_pick_team: "Argentina",
     ...overrides,
   };
 }
@@ -540,6 +541,35 @@ test("special_predictions can be updated before the deadline but not after", asy
   await assertFails(
     johan.collection("special_predictions").doc("johan").update({ champion_pick: "France" })
   );
+});
+
+test("special_predictions update can change top_scorer_pick_team alongside the pick itself", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+    await db.collection("special_predictions").doc("johan").set(samplePick());
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  await assertSucceeds(
+    johan
+      .collection("special_predictions")
+      .doc("johan")
+      .update({ top_scorer_pick: "Mbappé", top_scorer_pick_team: "France" })
+  );
+});
+
+test("special_predictions create fails when top_scorer_pick_team is missing", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+  const { top_scorer_pick_team, ...pickWithoutTeam } = samplePick();
+
+  await assertFails(johan.collection("special_predictions").doc("johan").set(pickWithoutTeam));
 });
 
 test("special_predictions create fails once the deadline has passed", async () => {

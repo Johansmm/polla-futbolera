@@ -68,9 +68,10 @@ export function calculateChampionPoints(championPick, { champion, finalists }, c
   return 0;
 }
 
-// pickTeam is the team the picked player belongs to (look up via
-// lock-logic.mjs's findTeamForPlayer against team_rosters), or null if not
-// found.
+// pickTeam is the team the picked player belongs to, resolved once at
+// special_predictions save time and stored on the pick as
+// top_scorer_pick_team (js/special.js) — or null if unset (a pick made
+// before that field existed).
 export function calculateTopScorerPoints(
   topScorerPick,
   { topScorer, top3Scorers, pickTeam, semifinalists },

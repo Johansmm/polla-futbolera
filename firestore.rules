@@ -128,11 +128,12 @@ service cloud.firestore {
         && request.resource.data.user_id == userId
         && request.resource.data.champion_pick is string
         && request.resource.data.top_scorer_pick is string
+        && request.resource.data.top_scorer_pick_team is string
         && !specialPredictionsDeadlinePassed(true);
 
       allow update: if isOwner(userId)
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['champion_pick', 'top_scorer_pick'])
+             .hasOnly(['champion_pick', 'top_scorer_pick', 'top_scorer_pick_team'])
         && !specialPredictionsDeadlinePassed(true);
 
       allow delete: if false;
