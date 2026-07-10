@@ -6,7 +6,7 @@
 // as scoring-logic.mjs/lock-logic.mjs/worker-matches.mjs — standings.js
 // itself can't be, since it imports the Firebase SDK from a CDN URL that
 // Node's module resolution can't follow.
-import { isMatchLocked, kickoffDate, findTeamForPlayer } from "./lock-logic.mjs";
+import { isMatchLocked, kickoffDate } from "./lock-logic.mjs";
 import {
   scoreMatchBreakdown,
   calculateChampionPoints,
@@ -64,7 +64,6 @@ export function computeStandingsFromData({
   scoringConfig,
   users,
   matches,
-  rosters,
   tournamentResults,
   predictionsByMatch,
   specialPicks,
@@ -124,7 +123,7 @@ export function computeStandingsFromData({
             {
               topScorer,
               top3Scorers: tournamentResults.top_3_scorers ?? [],
-              pickTeam: findTeamForPlayer(rosters, pick.top_scorer_pick),
+              pickTeam: pick.top_scorer_pick_team ?? null,
               semifinalists,
             },
             scoringConfig.special_predictions.top_scorer

@@ -126,7 +126,6 @@ test("computeStandingsFromData scores match and champion picks, ranks, and build
     scoringConfig: SCORING_CONFIG,
     users,
     matches,
-    rosters: [],
     tournamentResults: null,
     predictionsByMatch,
     specialPicks,
@@ -168,7 +167,6 @@ test("computeStandingsFromData marks a scorable match with no prediction as a mi
     scoringConfig: SCORING_CONFIG,
     users,
     matches: [finishedR16],
-    rosters: [],
     tournamentResults: null,
     predictionsByMatch: { r16_01: {} },
     specialPicks: {},
@@ -180,6 +178,27 @@ test("computeStandingsFromData marks a scorable match with no prediction as a mi
   assert.equal(alice.matchPoints, 0);
   assert.equal(alice.matchBreakdown.r16_01.points, 0);
   assert.equal(result.specialSections.length, 0);
+});
+
+test("computeStandingsFromData applies the semifinal/final bonus using the pick's stored top_scorer_pick_team", () => {
+  const { finishedR16 } = buildScenario();
+  // deriveSemifinalists only looks at phase/team_a/team_b — no need to run
+  // this through mergeMatchData like the other fixtures above.
+  const sfMatch = { id: "sf_01", phase: "sf", team_a: "Argentina", team_b: "Croatia" };
+  const users = [{ user_id: "alice", name: "Alice" }];
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches: [finishedR16, sfMatch],
+    tournamentResults: { top_scorer: "Lionel Messi", top_3_scorers: [] },
+    predictionsByMatch: { r16_01: {} },
+    specialPicks: { alice: { top_scorer_pick: "Lionel Messi", top_scorer_pick_team: "Argentina" } },
+    specialRevealed: true,
+  });
+
+  const alice = result.rows[0];
+  assert.equal(alice.topScorerPoints, 10 + 3); // exact (10) + team reached the semifinal (3)
 });
 
 // hasMatchNeedingRefresh backs standings.js's poll loop: a network-free

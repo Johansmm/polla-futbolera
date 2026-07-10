@@ -173,6 +173,7 @@ async function main() {
         user_id: userId,
         champion_pick: championPick,
         top_scorer_pick: topScorerPick,
+        top_scorer_pick_team: scorerTeamSelect.value,
       });
       showStatus(
         submitFeedback,

@@ -12,7 +12,6 @@ import { showStatus, showRetry, showSignedInName } from "./ui.js";
 import { isPastDeadline } from "./lock-logic.mjs";
 import {
   fetchSpecialPredictionsDeadline,
-  fetchTeamRosters,
   fetchUserName,
   fetchFirestoreMatches,
   fetchWorkerMatches,
@@ -84,11 +83,10 @@ function mergeWorkerMatches(firestoreMatches, workerMatches) {
 // often enough (or, for firestoreMatches, is even allowed by firestore.rules
 // to be cheaply re-read) to justify a Firestore round-trip on every tick.
 async function loadStaticData() {
-  const [scoringConfig, users, rosters, specialDeadline, tournamentResults, firestoreMatches, workerMatches] =
+  const [scoringConfig, users, specialDeadline, tournamentResults, firestoreMatches, workerMatches] =
     await Promise.all([
       fetchScoringConfig(),
       fetchUsers(),
-      fetchTeamRosters(),
       fetchSpecialPredictionsDeadline(),
       fetchTournamentResults(),
       fetchFirestoreMatches(),
@@ -112,7 +110,6 @@ async function loadStaticData() {
   return {
     scoringConfig,
     users,
-    rosters,
     tournamentResults,
     specialRevealed,
     specialPicks,
@@ -128,7 +125,6 @@ function computeStandings(state) {
     scoringConfig: state.scoringConfig,
     users: state.users,
     matches: state.matches,
-    rosters: state.rosters,
     tournamentResults: state.tournamentResults,
     predictionsByMatch: state.predictionsByMatch,
     specialPicks: state.specialPicks,

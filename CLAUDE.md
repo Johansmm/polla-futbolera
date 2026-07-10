@@ -119,6 +119,7 @@ everyone once `matches.{match_id}` is locked, not just the owner (see
 | `user_id` | string | |
 | `champion_pick` | string | |
 | `top_scorer_pick` | string | |
+| `top_scorer_pick_team` | string | The picked player's national team, resolved from `team_rosters` and stored at save time (`special.html`'s two-step dropdown already knows it) so `standings.js` never has to re-fetch every team's roster just to check the `team_reaches_semifinal_or_final_bonus` |
 
 No `champion_points`/`top_scorer_points` fields, same reasoning as
 `predictions` above. Chosen via `special.html`, editable (create or update)
