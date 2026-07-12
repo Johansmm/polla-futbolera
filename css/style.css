@@ -861,6 +861,14 @@ td.num {
   font-variant-numeric: tabular-nums;
 }
 
+.section-rules {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  font-size: 0.85rem;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--line);
+}
+
 .pending {
   color: var(--ink-faint);
   font-style: italic;

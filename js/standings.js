@@ -22,6 +22,7 @@ import {
   selectNewlyScorableMatches,
   hasMatchNeedingRefresh,
   computeStandingsFromData,
+  PHASE_TAGS,
 } from "./standings-logic.mjs";
 
 const statusEl = document.getElementById("status");
@@ -29,6 +30,7 @@ const noteEl = document.getElementById("standings-note");
 const tableEl = document.getElementById("standings-table");
 const sectionsEl = document.getElementById("breakdown-sections");
 const columnsHelpEl = document.getElementById("columns-help");
+const scoringHelpEl = document.getElementById("scoring-help");
 
 // Display-freshness only, not an API-consumption concern — the Worker's
 // /matches route is shared-KV-cached for 60s (see README's "Cloudflare
@@ -42,6 +44,37 @@ async function fetchScoringConfig() {
   const res = await fetch("scoring_config.json");
   if (!res.ok) throw new Error("scoring_config.json not found");
   return res.json();
+}
+
+// Concise, general-purpose explanation of the match-points formula — values
+// read from scoringConfig at render time (never hardcoded) so this can't
+// drift from scoring_config.json. The champion/top scorer picks' own rules
+// live in their respective breakdown sections instead (renderSection's
+// `rules`, built alongside them in standings-logic.mjs), since that's where
+// the reader is already looking at their own pick and points.
+function buildScoringSummaryMarkup(scoringConfig) {
+  const { match_outcome_points: outcome, phase_multipliers: multipliers } = scoringConfig;
+  const examplePhase = "qf";
+  const exampleMultiplier = multipliers[examplePhase];
+  const examplePoints = outcome.exact_score * exampleMultiplier;
+
+  const multiplierList = Object.entries(multipliers)
+    .map(([phase, multiplier]) => `${PHASE_TAGS[phase] ?? phase} ×${multiplier}`)
+    .join(", ");
+
+  return `
+    <p>Match points = outcome tier × phase multiplier. Example: you predict 2–1 and the ${PHASE_TAGS[examplePhase] ?? examplePhase} match ends 2–1 — exact score (${outcome.exact_score} pts) × the phase's ${exampleMultiplier}× multiplier = ${examplePoints} pts.</p>
+    <ul>
+      <li>Exact score: ${outcome.exact_score} pts</li>
+      <li>Correct winner + correct goal difference (decisive matches only): ${outcome.correct_winner_and_difference} pts</li>
+      <li>Correct winner, or a correctly predicted draw: ${outcome.correct_winner_or_draw} pts</li>
+      <li>Anything else: ${outcome.miss} pts</li>
+    </ul>
+    <p>A correctly predicted draw never counts as "correct difference" — a draw's difference is always 0, not a meaningful "correct margin" the way it is for a decisive result, so it always falls to the tier below instead.</p>
+    <p>Phase multipliers: ${multiplierList}.</p>
+    <p>The champion and top scorer picks are scored separately — see their own rules in the "Champion picks" and "Top scorer picks" sections below.</p>
+    <p>Ties in total points go to whoever has the most exact-score match predictions across the whole tournament.</p>
+  `;
 }
 
 async function fetchUsers() {
@@ -269,15 +302,22 @@ function renderTable(rows, totalScorableMatches, viewerId) {
   tableEl.appendChild(table);
   tableEl.hidden = false;
   columnsHelpEl.hidden = false;
+  scoringHelpEl.hidden = false;
 }
 
-function renderSection({ title, entries }) {
+function renderSection({ title, rules, entries }) {
   const section = document.createElement("details");
   section.className = "breakdown-section";
 
   const summary = document.createElement("summary");
   summary.innerHTML = title;
   section.appendChild(summary);
+
+  if (rules) {
+    const rulesEl = document.createElement("div");
+    rulesEl.innerHTML = rules;
+    section.appendChild(rulesEl);
+  }
 
   const table = document.createElement("table");
   table.innerHTML = '<thead><tr><th>Name</th><th>Prediction</th><th class="num">Points</th></tr></thead>';
@@ -397,9 +437,21 @@ async function main() {
     return;
   }
 
+  scoringHelpEl.insertAdjacentHTML("beforeend", buildScoringSummaryMarkup(state.scoringConfig));
+
   state.lastRenderKey = null;
   renderIfChanged(state, computeStandings(state), userId);
   startPolling(state, userId);
+
+  // A #scoring-help link from predict.html/special.html lands here before
+  // this element's `hidden` attribute is cleared by the render above (the
+  // browser resolves the URL fragment synchronously on load, well before
+  // these async fetches resolve), so the initial jump silently does
+  // nothing — open and scroll to it manually once it actually exists.
+  if (location.hash === "#scoring-help" && !scoringHelpEl.hidden) {
+    scoringHelpEl.open = true;
+    scoringHelpEl.scrollIntoView();
+  }
 }
 
 main();
