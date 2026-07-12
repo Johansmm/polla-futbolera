@@ -349,6 +349,23 @@ API_KEY=your-football-data.org-token
   on the next request, and every client picks it up automatically. Matches
   also lock purely by `kickoff_at` (enforced in `firestore.rules`) — there's
   no admin override to force a match locked early.
+- **Tokens are moved off the `users` docs automatically** — no action needed.
+  `automation/migrate-tokens.js` runs on every push to `main` (the
+  `migrate-tokens` job in `.github/workflows/deploy.yml`), so a database seeded
+  before `user_links` existed is repaired on the next deploy, and the invariant
+  "no token is readable by a client" can't quietly regress later. It's
+  idempotent and does zero writes once there's nothing left to migrate. Nobody's
+  link breaks: the token value doesn't change, it just stops being readable by
+  other players. To preview it by hand:
+  `cd automation && FIREBASE_SERVICE_ACCOUNT_JSON="$(cat ../admin/serviceAccountKey.json)" node migrate-tokens.js`
+  (dry run; `--apply` to write).
+- **Rotate everyone's token** (only if you think the old ones leaked — moving a
+  leaked token somewhere safe doesn't stop it from working): run the same script
+  by hand with `--apply --rotate`. It issues fresh tokens, revokes the old ones,
+  and prints the new links, which you then have to re-send. Devices stay bound
+  (`auth_links` is keyed by `user_id`, not by token), so nobody has to re-bind —
+  they just need the new URL. CI refuses `--rotate` outright: it invalidates
+  every link and only makes sense when someone is standing by to send them out.
 - **Re-read someone's link** (they lost it, no rotation needed): read
   `user_links/{user_id}.token` in the Console. That collection is admin-only —
   no client can read it, which is exactly why the token can live there.
