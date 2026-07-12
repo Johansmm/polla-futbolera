@@ -92,3 +92,32 @@ jobs:
         run: npx firebase deploy --only firestore:rules --non-interactive
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
+
+  deploy-worker:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache worker node_modules
+        id: cache-worker
+        uses: actions/cache@v4
+        with:
+          path: worker/node_modules
+          key: ${{ runner.os }}-npm-worker-${{ hashFiles('worker/package.json') }}
+
+      - name: Install worker dependencies
+        if: steps.cache-worker.outputs.cache-hit != 'true'
+        run: npm install
+        working-directory: worker
+
+      - name: Deploy Cloudflare Worker
+        run: npm run deploy
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

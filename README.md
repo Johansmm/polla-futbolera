@@ -129,6 +129,18 @@ independent binding docs — no coordination needed. See `firestore.rules` and
    - `npm run deploy` from `worker/` (wraps `wrangler deploy`). Wrangler
      prints the deployed Worker's URL — paste it into
      `js/worker-config.js`'s `WORKER_URL`.
+   - This one-time manual run is only needed for the very first deploy.
+     After that, `.github/workflows/ci.yml`'s `deploy-worker` job redeploys
+     the Worker automatically on every push to `main` (once tests pass) —
+     no more remembering to run `npm run deploy` by hand after merging a PR
+     that touches `worker/`. Needs a repo Secret: Settings → Secrets and
+     variables → Actions → New repository secret → `CLOUDFLARE_API_TOKEN`,
+     a token from [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+     → Create Token → the **Edit Cloudflare Workers** template (scoped to
+     the account this Worker lives in). The `API_KEY` secret pushed above
+     via `wrangler secret put` isn't touched by a redeploy — it's separate,
+     KV-namespace-backed Worker state, not part of what `wrangler deploy`
+     uploads.
 
 3. **Seed the fixture and users**
    - Edit `admin/seed.js`: fill in `USERS` (your group's clients) — matches
@@ -237,9 +249,11 @@ GitHub Actions runs the same tests (plus a `node --check` syntax pass over
 every `.js`/`.mjs` file in the repo) on every pull request and push to
 `main` — see `.github/workflows/ci.yml`. The Actions runner already has
 Java preinstalled, so no extra setup is needed there. On push to `main`
-specifically, a second job (`deploy-rules`) runs after tests pass and
-redeploys `firestore.rules` automatically — see "Deploy the security rules"
-above.
+specifically, two more jobs run after tests pass: `deploy-rules` redeploys
+`firestore.rules` (see "Deploy the security rules" above), and
+`deploy-worker` redeploys the Cloudflare Worker (see "Set up the Cloudflare
+Worker" above) — neither needs a manual `firebase deploy`/`npm run deploy`
+after merging a PR that touches them.
 
 ## Cloudflare Worker match proxy
 
