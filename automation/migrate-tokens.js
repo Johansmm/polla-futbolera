@@ -1,12 +1,18 @@
-// One-off security migration (Admin SDK — bypasses all Firestore security
-// rules, run this locally only, never deploy it as a live endpoint).
+// Security migration (Admin SDK — bypasses all Firestore security rules).
 //
-// Usage:
-//   cd admin
+// Runs automatically on every push to main (see
+// .github/workflows/deploy.yml's migrate-tokens job), because the fix it
+// applies is not optional and must not depend on someone remembering to run
+// it. It's idempotent and performs zero writes once there's nothing left to
+// migrate, so running it on every deploy costs a handful of reads and
+// permanently enforces the invariant: no token is ever readable by a client.
+//
+// Can also be run by hand:
+//   cd automation
 //   npm install
-//   node migrate-tokens.js            # dry run — prints what it WOULD do, writes nothing
-//   node migrate-tokens.js --apply    # actually performs the migration
-//   node migrate-tokens.js --apply --rotate
+//   FIREBASE_SERVICE_ACCOUNT_JSON="$(cat ../admin/serviceAccountKey.json)" \
+//     node migrate-tokens.js          # dry run — prints what it WOULD do, writes nothing
+//   ... node migrate-tokens.js --apply    # actually performs the migration
 //
 // Earlier versions of admin/seed.js stored each player's login token as a field
 // on their users/{user_id} doc. Every player can read that collection (the
@@ -31,18 +37,41 @@
 // doesn't stop it from working. It invalidates every existing link, so you must
 // re-send them. Devices stay bound (auth_links is keyed by user_id, not token),
 // so nobody has to re-bind; they just need the new URL.
+//
+// Rotation is a deliberate, disruptive act that has to be paired with sending
+// ten people a new link, so it is refused outright in CI (see below) — it is a
+// hands-on decision, never something a merge can trigger by accident.
 const admin = require("firebase-admin");
 const crypto = require("crypto");
-const serviceAccount = require("./serviceAccountKey.json");
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-
-const db = admin.firestore();
 
 const APPLY = process.argv.includes("--apply");
 const ROTATE = process.argv.includes("--rotate");
+
+if (ROTATE && process.env.CI) {
+  console.error(
+    "Refusing to --rotate from CI: rotation invalidates every player's link and only makes\n" +
+      "sense when someone is standing by to re-send them. Run it by hand if that's what you want."
+  );
+  process.exit(1);
+}
+
+// The service account comes from the FIREBASE_SERVICE_ACCOUNT_JSON secret in
+// CI (same one deploy.yml and missing-predictions.yml already use); a local run
+// can point it at admin/serviceAccountKey.json, which is gitignored.
+const credentialsJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+if (!credentialsJson) {
+  console.error(
+    "Missing FIREBASE_SERVICE_ACCOUNT_JSON env var.\n" +
+      'Locally: FIREBASE_SERVICE_ACCOUNT_JSON="$(cat ../admin/serviceAccountKey.json)" node migrate-tokens.js'
+  );
+  process.exit(1);
+}
+
+admin.initializeApp({
+  credential: admin.credential.cert(JSON.parse(credentialsJson)),
+});
+
+const db = admin.firestore();
 
 // Same generator as admin/seed.js — 128 bits of CSPRNG entropy, so a token is
 // unguessable even though tokens/{token} is gettable by anyone signed in.
@@ -87,21 +116,26 @@ async function main() {
       continue;
     }
     const token = ROTATE ? generateToken() : currentToken;
+    const needsLinkWrite = !linkSnap.exists || linkSnap.data().token !== token;
 
     const actions = [];
     if (legacyToken) actions.push("strip token from users doc");
-    if (!linkSnap.exists || linkSnap.data().token !== token) actions.push("write user_links");
+    if (needsLinkWrite) actions.push("write user_links");
     if (ROTATE) actions.push(`new token (revokes old link${currentToken ? "" : ", none existed"})`);
 
     console.log(`  ${userId}: ${actions.length ? actions.join(", ") : "already migrated, nothing to do"}`);
 
-    if (!APPLY) continue;
+    // Nothing to do is the steady state — this runs on every push to main, so
+    // a fully-migrated database must cost reads only, never writes.
+    if (!APPLY || !actions.length) continue;
 
     // Order matters: the token is safely in its new home (and the tokens/
     // lookup points at the user) BEFORE it's removed from the old one. A
     // failure partway through leaves a token readable-but-working, never a
     // player locked out of their own link.
-    await db.collection("user_links").doc(userId).set({ token }, { merge: true });
+    if (needsLinkWrite) {
+      await db.collection("user_links").doc(userId).set({ token }, { merge: true });
+    }
 
     if (ROTATE) {
       await db.collection("tokens").doc(token).set({ user_id: userId });

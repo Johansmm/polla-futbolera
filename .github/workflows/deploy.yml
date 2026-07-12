@@ -41,6 +41,44 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/service-account.json
 
+  # Enforces the invariant the rules above depend on: no token is readable by
+  # any client. The rules stop a stranger reading the users collection, but they
+  # cannot un-store a token that's sitting in it — only this can, and a fix that
+  # important must not depend on someone remembering to run a script by hand.
+  #
+  # Runs after deploy-rules so the two can never disagree about what's enforced,
+  # idempotent, and performs zero writes once there's nothing left to migrate —
+  # so on every subsequent deploy this is a cheap, self-verifying no-op.
+  # Deliberately never passes --rotate: that invalidates every player's link and
+  # is a hands-on decision, so migrate-tokens.js refuses it in CI outright.
+  migrate-tokens:
+    runs-on: ubuntu-latest
+    needs: deploy-rules
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache automation node_modules
+        id: cache-automation
+        uses: actions/cache@v4
+        with:
+          path: automation/node_modules
+          key: ${{ runner.os }}-npm-automation-${{ hashFiles('automation/package.json') }}
+
+      - name: Install automation dependencies
+        if: steps.cache-automation.outputs.cache-hit != 'true'
+        run: npm install
+        working-directory: automation
+
+      - name: Move any client-readable token out of the users collection
+        run: node migrate-tokens.js --apply
+        working-directory: automation
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+
   deploy-worker:
     runs-on: ubuntu-latest
     steps:
