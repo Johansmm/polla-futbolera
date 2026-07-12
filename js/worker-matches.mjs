@@ -41,6 +41,29 @@ export function buildResultFields(apiMatch) {
   };
 }
 
+// Which side actually won, as "a"/"b" (or null for a match that somehow
+// finished level). Kept separate from real_score_a/b on purpose: a knockout
+// tie is settled by a shootout, whose goals must stay *out* of the score the
+// pool grades predictions against (see buildResultFields above) but are the
+// only thing that says who went through. Without this, a Final decided on
+// penalties would look like a draw with no winner at all — see
+// scoring-logic.mjs's deriveChampion.
+export function buildWinnerField(apiMatch) {
+  if (apiMatch.status !== "FINISHED") return {};
+
+  const { real_score_a: a, real_score_b: b } = buildResultFields(apiMatch);
+  if (a !== b) return { winner: a > b ? "a" : "b" };
+
+  const { penalties } = apiMatch.score;
+  if (penalties?.home != null && penalties.home !== penalties.away) {
+    return { winner: penalties.home > penalties.away ? "a" : "b" };
+  }
+
+  // A phase that allows draws (none of the ones this pool scores) — or a
+  // shootout the source hasn't filled in yet.
+  return { winner: null };
+}
+
 // live_score_a/b are a running score shown while a match is in progress,
 // separate from real_score_a/b (the final result). Cleared back to null at
 // FINISHED so a match's live/finished state stays inferable from these two
@@ -76,6 +99,7 @@ export function mergeMatchData(firestoreMatch, sourceMatchesById) {
     team_a_crest_url: apiMatch.homeTeam?.crest ?? null,
     team_b_crest_url: apiMatch.awayTeam?.crest ?? null,
     ...buildResultFields(apiMatch),
+    ...buildWinnerField(apiMatch),
     ...buildLiveScoreFields(apiMatch),
   };
 }

@@ -313,16 +313,54 @@ test("deriveChampion declares the winner once the final has a decisive score", (
   });
 });
 
-// A drawn final score (e.g. still awaiting the penalty-shootout result to be
-// recorded as the decisive number) must not be mistaken for team_a winning —
-// same "0 diff isn't a real result" pitfall scoreMatch already guards against.
-test("deriveChampion awards no champion when the final's real score is a draw", () => {
+// A level final score with no reported winner must not be mistaken for
+// team_a winning — same "0 diff isn't a real result" pitfall scoreMatch
+// already guards against.
+test("deriveChampion awards no champion when the final is level and no winner is reported", () => {
   const matches = [{ phase: "final", team_a: "Argentina", team_b: "France", real_score_a: 1, real_score_b: 1 }];
   assert.deepEqual(deriveChampion(matches), {
     champion: null,
     finalists: ["Argentina", "France"],
     championIsFinal: true,
   });
+});
+
+// The regression that mattered most: a Final settled on penalties is level on
+// real_score_a/b by design (the shootout is excluded from the score the pool
+// grades predictions against, see worker-matches.mjs), so scoreline-only
+// logic named no champion at all — and the finalist tier fell with it.
+test("deriveChampion crowns the shootout winner of a Final that ended level", () => {
+  const matches = [
+    { phase: "final", team_a: "Argentina", team_b: "France", real_score_a: 1, real_score_b: 1, winner: "b" },
+  ];
+  assert.deepEqual(deriveChampion(matches), {
+    champion: "France",
+    finalists: ["Argentina", "France"],
+    championIsFinal: true,
+  });
+});
+
+test("deriveChampion prefers the reported winner over the scoreline", () => {
+  const matches = [
+    { phase: "final", team_a: "Argentina", team_b: "France", real_score_a: 3, real_score_b: 0, winner: "a" },
+  ];
+  assert.equal(deriveChampion(matches).champion, "Argentina");
+});
+
+// calculateChampionPoints is called as soon as the Final has a line-up, so an
+// unset pick must not collide with a champion that's still null.
+test("calculateChampionPoints scores nothing for a missing pick, even with no champion yet", () => {
+  assert.equal(
+    calculateChampionPoints(undefined, { champion: null, finalists: ["Argentina", "France"] }, CHAMPION_CONFIG),
+    0
+  );
+});
+
+test("calculateChampionPoints awards the finalist tier before the champion is known", () => {
+  assert.equal(
+    calculateChampionPoints("France", { champion: null, finalists: ["Argentina", "France"] }, CHAMPION_CONFIG),
+    CHAMPION_CONFIG.finalist
+  );
 });
 
 test("deriveChampion returns no finalists when the final match doesn't exist yet", () => {
