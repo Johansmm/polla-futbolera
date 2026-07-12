@@ -19,8 +19,8 @@ sequenceDiagram
     Note over Client,API: Every page load
     Client->>Firestore: read matches (skeleton) + predictions
     Client->>Worker: GET /matches
-    Worker->>API: fetch (skipped if cached, TTL 15s)
-    Worker-->>Client: teams, crests, live/final scores
+    Worker->>API: fetch (skipped if cached)
+    Worker-->>Client: teams, crests, live/final scores, live scorer list
     Note over Client: merge + compute points client-side — nothing server-side
 
     Note over Client,Firestore: When a user saves a prediction
@@ -255,17 +255,27 @@ The Worker exposes one read-only route, backed by a Workers KV cache shared
 across every concurrent client so the group loading the app at once doesn't
 multiply real football-data.org calls:
 
-- `GET /matches` → every World Cup match in one response — scheduled
-  fixtures, in-progress scores, and finished results alike, exactly as
-  football-data.org returns them — cached 15s, close to `standings.html`'s
-  own 10s poll interval so a live score reaches clients about as fresh as
-  they ask for it, without approaching the free tier's 10 calls/min limit
-  (15s cache ≈ 4 calls/min)
+- `GET /matches` → every World Cup match — scheduled fixtures, in-progress
+  scores, and finished results alike — plus the tournament's live
+  goal-scorer list, in one combined response: `{ matches: [...], scorers:
+  [...] }`. Cached `MATCH_CACHE_TTL_SECONDS` (`js/football-data-config.mjs`),
+  well under the free tier's 10 calls/min limit. The scorers half only costs
+  a real upstream call when the total goals across every match changed
+  since the last cached snapshot (i.e. a goal was actually scored
+  somewhere) — otherwise the previous snapshot's scorers are reused,
+  keeping the added call volume close to zero the rest of the time
+
+`js/scoring-logic.mjs`'s `deriveTopScorers` turns that `scorers` list into
+the current tournament top scorer (or several, tied) for the standings
+page's "Special" points column — the normal, sufficient source all
+tournament, not a placeholder for an admin step. `config/tournament_results.
+top_scorer` only overrides it for a goals tie the live signal can't resolve
+on its own (see "Scoring rules" in `CLAUDE.md`).
 
 Alongside that short-lived cache entry, the Worker keeps a second,
 non-expiring KV entry holding the last successful upstream response. If a
 real call to football-data.org fails (thrown network error or a non-ok
-status) after the 15s cache has expired, the Worker serves that stale entry
+status) after the short-lived cache has expired, the Worker serves that stale entry
 instead of a bare error, so a temporary upstream outage doesn't blank out
 match data for the group — the response carries an `X-Cache-Status: stale`
 header so a future client-side change could surface "data might be
