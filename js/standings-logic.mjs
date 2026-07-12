@@ -21,8 +21,10 @@ import {
 import { teamFlagImg, formatKickoff } from "./ui.js";
 
 // Compact phase tags for the per-match breakdown summaries, which have to
-// fit a phone screen alongside two team names and flags.
-const PHASE_TAGS = {
+// fit a phone screen alongside two team names and flags. Also reused by
+// standings.js's scoring rules explainer, so phase names stay consistent
+// between the breakdown sections and the explanation of how they're scored.
+export const PHASE_TAGS = {
   r16: "R16",
   qf: "QF",
   sf: "SF",
@@ -223,10 +225,19 @@ export function computeStandingsFromData({
       };
     });
 
+  // Section-specific scoring rules, read from scoringConfig at render time
+  // (never hardcoded) so they can't drift from scoring_config.json — shown
+  // right in each special-picks section instead of the generic scoring-help
+  // summary, since that's where the reader is already looking at their own
+  // pick and points.
+  const championConfig = scoringConfig.special_predictions.champion;
+  const topScorerConfig = scoringConfig.special_predictions.top_scorer;
+
   const specialSections = specialRevealed
     ? [
         {
           title: '<span class="summary-title">Champion picks</span>',
+          rules: `<p class="section-rules">Pick the eventual champion for <strong>${championConfig.exact_champion} pts</strong>; pick a finalist that doesn't win it for <strong>${championConfig.finalist} pts</strong>; anything else, 0.</p>`,
           entries: rankEntries(
             rows.map((row) => ({ name: row.name, prediction: row.championPick ?? "—", points: row.championPoints }))
           ),
@@ -236,6 +247,7 @@ export function computeStandingsFromData({
             <span class="summary-title">Top scorer picks</span>
             ${leaders.length ? `<span class="summary-sub">Current leader: ${leaders.join(", ")} (${leaderGoals} goals)</span>` : ""}
           `,
+          rules: `<p class="section-rules">Pick the exact top scorer for <strong>${topScorerConfig.exact} pts</strong>, or land in the top 3 for <strong>${topScorerConfig.top_3} pts</strong>. Either way, add <strong>${topScorerConfig.team_reaches_semifinal_or_final_bonus} pts</strong> on top (never alone) if that player's team reached the Semifinal or Final.</p>`,
           entries: rankEntries(
             rows.map((row) => ({ name: row.name, prediction: row.topScorerPick ?? "—", points: row.topScorerPoints }))
           ),

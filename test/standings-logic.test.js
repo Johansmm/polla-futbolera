@@ -216,6 +216,15 @@ test("specialSections rank entries by that section's own points, not the overall
 
   const [championSection, topScorerSection] = result.specialSections;
 
+  // Each special section's own scoring rules — read from scoringConfig at
+  // render time, shown right next to that section's picks/points instead of
+  // the generic scoring-help summary (issue #63).
+  assert.match(championSection.rules, /8 pts/);
+  assert.match(championSection.rules, /3 pts/);
+  assert.match(topScorerSection.rules, /10 pts/);
+  assert.match(topScorerSection.rules, /5 pts/);
+  assert.match(topScorerSection.rules, /3 pts/);
+
   assert.deepEqual(
     championSection.entries.map((e) => e.name),
     ["Bob", "Alice"]
