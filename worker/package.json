@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "description": "Cloudflare Worker proxying football-data.org for match data, with a KV cache shared across all users. Not intended to run inside the root Firestore-rules test suite.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
