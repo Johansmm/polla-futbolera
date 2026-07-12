@@ -80,6 +80,54 @@ test("unauthenticated client cannot read matches", async () => {
   await assertFails(unauth.firestore().collection("matches").doc("r16_01").get());
 });
 
+// Anonymous sign-in is open to anyone on the internet (the web app's Firebase
+// config is public by design), so merely holding an auth uid must buy nothing:
+// a client only becomes a player by presenting a real token, which is what
+// creates its auth_links binding. Without this, any stranger could read the
+// whole pool — including, before the token moved off the user doc, everyone's
+// credentials.
+test("a signed-in client that never presented a token can read nothing", async () => {
+  await seed(async (db) => {
+    await db.collection("matches").doc("r16_01").set(futureMatch());
+    await db.collection("users").doc("johan").set({ user_id: "johan", name: "Johan" });
+    await db.collection("team_rosters").doc("France").set({ team: "France", players: ["Kylian Mbappé"] });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+  });
+
+  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+
+  await assertFails(stranger.collection("matches").doc("r16_01").get());
+  await assertFails(stranger.collection("users").doc("johan").get());
+  await assertFails(stranger.collection("users").get());
+  await assertFails(stranger.collection("team_rosters").doc("France").get());
+  await assertFails(stranger.collection("config").doc("special_predictions").get());
+});
+
+// The standings page lists every player by name, so the users collection is
+// readable by the whole pool — which is exactly why a token must never be
+// stored on it. This pins the invariant that made that safe.
+test("a player can list users, and user tokens are not reachable from any client", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await db.collection("users").doc("johan").set({ user_id: "johan", name: "Johan" });
+    await db.collection("users").doc("kevin").set({ user_id: "kevin", name: "Kevin" });
+    // Where the token actually lives now: admin-only, never client-readable.
+    await db.collection("user_links").doc("kevin").set({ token: "kevin-token" });
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  const snap = await assertSucceeds(johan.collection("users").get());
+  assert.equal(snap.size, 2);
+  // Names, yes. Credentials, no — not on the doc, and not anywhere a client
+  // can reach, so one player can never impersonate another.
+  assert.ok(snap.docs.every((d) => d.data().token === undefined));
+
+  await assertFails(johan.collection("user_links").doc("kevin").get());
+  await assertFails(johan.collection("user_links").get());
+  await assertFails(johan.collection("user_links").doc("johan").set({ token: "self-issued" }));
+});
+
 test("binding a device to a user requires knowing the real token", async () => {
   await seed((db) => db.collection("tokens").doc("real-token").set({ user_id: "johan" }));
 
@@ -340,6 +388,53 @@ test("prediction update cannot smuggle in changes to user_id, match_id, or point
   );
 });
 
+// The update rule has always constrained which keys can change; create used
+// to be the hole through which extra fields could be parked on a doc the
+// whole pool reads once the match locks.
+test("prediction create cannot smuggle in fields outside the known schema", async () => {
+  await seed(async (db) => {
+    await db.collection("matches").doc("r16_01").set(futureMatch());
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  await assertFails(
+    johan.collection("predictions").doc("johan_r16_01").set({
+      prediction_id: "johan_r16_01",
+      user_id: "johan",
+      match_id: "r16_01",
+      predicted_score_a: 2,
+      predicted_score_b: 1,
+      points_earned: 999,
+    })
+  );
+});
+
+// Create type-checks the picks; update must too, or a pick can be swapped
+// for something create would never have accepted — and these get rendered
+// into everyone's standings once revealed.
+test("special_predictions update cannot swap a pick for a non-string", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+    await db.collection("special_predictions").doc("johan").set(samplePick());
+  });
+
+  const johan = testEnv.authenticatedContext("johan-uid").firestore();
+
+  await assertFails(
+    johan.collection("special_predictions").doc("johan").update({ champion_pick: 42 })
+  );
+  await assertFails(
+    johan.collection("special_predictions").doc("johan").update({ top_scorer_pick: ["Messi"] })
+  );
+  // The legitimate edit still works.
+  await assertSucceeds(
+    johan.collection("special_predictions").doc("johan").update({ champion_pick: "Brazil" })
+  );
+});
+
 test("a device's auth_links binding cannot be deleted by its own owner", async () => {
   await seed((db) => bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" }));
 
@@ -386,20 +481,19 @@ test("other users' predictions are hidden pre-kickoff but visible once locked", 
 // case behaves the same as the single-doc `get()` case above. Firestore
 // evaluates list rules against the query's *potential* result set, and
 // matchDeadlinePassed(matchId) is the same value for every doc a
-// `.where("match_id", "==", matchId)` query can possibly return, so this is
-// expected to hold — but it was never actually exercised until now.
+// `.where("match_id", "==", matchId)` query can possibly return.
 //
-// The querying user below is never bound via bindUser()/auth_links on
-// purpose: matchDeadlinePassed(...) alone satisfies the read rule's
-// `isOwner(...) || matchDeadlinePassed(...)`, regardless of who's asking,
-// so an unbound stranger is the more precise test of what's actually being
-// verified here. seed() also bypasses rules entirely, so no binding is
-// needed to write the fixture docs either.
+// The querying user is a *different* player from the ones who made the
+// predictions, which is the real point: matchDeadlinePassed(...) alone
+// satisfies the read rule's `isOwner(...) || matchDeadlinePassed(...)`, so
+// any player can read them once the match locks. seed() bypasses rules
+// entirely, so no binding is needed to write the fixture docs.
 test("a list query for a locked match's predictions returns every user's prediction", async () => {
   await seed(async (db) => {
     await db.collection("matches").doc("r16_01").set(
       futureMatch({ kickoff_at: new Date(Date.now() - HOUR) })
     );
+    await bindUser(db, { uid: "kevin-uid", userId: "kevin", token: "kevin-token" });
 
     await db.collection("predictions").doc("johan_r16_01").set({
       prediction_id: "johan_r16_01",
@@ -417,10 +511,10 @@ test("a list query for a locked match's predictions returns every user's predict
     });
   });
 
-  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+  const kevin = testEnv.authenticatedContext("kevin-uid").firestore();
 
   const snap = await assertSucceeds(
-    stranger.collection("predictions").where("match_id", "==", "r16_01").get()
+    kevin.collection("predictions").where("match_id", "==", "r16_01").get()
   );
   assert.equal(snap.size, 2);
 });
@@ -428,6 +522,7 @@ test("a list query for a locked match's predictions returns every user's predict
 test("a list query for a not-yet-locked match's predictions is denied", async () => {
   await seed(async (db) => {
     await db.collection("matches").doc("r16_01").set(futureMatch());
+    await bindUser(db, { uid: "kevin-uid", userId: "kevin", token: "kevin-token" });
 
     await db.collection("predictions").doc("johan_r16_01").set({
       prediction_id: "johan_r16_01",
@@ -438,9 +533,9 @@ test("a list query for a not-yet-locked match's predictions is denied", async ()
     });
   });
 
-  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+  const kevin = testEnv.authenticatedContext("kevin-uid").firestore();
 
-  await assertFails(stranger.collection("predictions").where("match_id", "==", "r16_01").get());
+  await assertFails(kevin.collection("predictions").where("match_id", "==", "r16_01").get());
 });
 
 // Same reasoning for special_predictions: the standings page needs every
@@ -451,25 +546,27 @@ test("a list query for a not-yet-locked match's predictions is denied", async ()
 test("a list query for special_predictions returns every pick once the reveal deadline passes", async () => {
   await seed(async (db) => {
     await setSpecialPredictionsDeadline(db, new Date(Date.now() - HOUR));
+    await bindUser(db, { uid: "kevin-uid", userId: "kevin", token: "kevin-token" });
     await db.collection("special_predictions").doc("johan").set(samplePick());
     await db.collection("special_predictions").doc("kevin").set(samplePick({ user_id: "kevin" }));
   });
 
-  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+  const kevin = testEnv.authenticatedContext("kevin-uid").firestore();
 
-  const snap = await assertSucceeds(stranger.collection("special_predictions").get());
+  const snap = await assertSucceeds(kevin.collection("special_predictions").get());
   assert.equal(snap.size, 2);
 });
 
 test("a list query for special_predictions is denied before the reveal deadline", async () => {
   await seed(async (db) => {
     await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+    await bindUser(db, { uid: "kevin-uid", userId: "kevin", token: "kevin-token" });
     await db.collection("special_predictions").doc("johan").set(samplePick());
   });
 
-  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+  const kevin = testEnv.authenticatedContext("kevin-uid").firestore();
 
-  await assertFails(stranger.collection("special_predictions").get());
+  await assertFails(kevin.collection("special_predictions").get());
 });
 
 test("special_predictions is hidden from others before the reveal deadline", async () => {
@@ -485,18 +582,24 @@ test("special_predictions is hidden from others before the reveal deadline", asy
   await assertFails(stranger.collection("special_predictions").doc("johan").get());
 });
 
-test("special_predictions becomes readable by everyone once the reveal deadline passes", async () => {
+test("special_predictions becomes readable by every player once the reveal deadline passes", async () => {
   await seed(async (db) => {
     await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await bindUser(db, { uid: "kevin-uid", userId: "kevin", token: "kevin-token" });
     await setSpecialPredictionsDeadline(db, new Date(Date.now() - HOUR));
     await db.collection("special_predictions").doc("johan").set(samplePick());
   });
 
-  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+  const kevin = testEnv.authenticatedContext("kevin-uid").firestore();
 
-  // A future standings page needs this to compute champion/top-scorer
-  // points for every user, not just the signed-in one.
-  await assertSucceeds(stranger.collection("special_predictions").doc("johan").get());
+  // The standings page needs this to compute champion/top-scorer points for
+  // every user, not just the signed-in one.
+  await assertSucceeds(kevin.collection("special_predictions").doc("johan").get());
+
+  // ...but "everyone" still means everyone *in the pool* — a signed-in
+  // session that never presented a token is not a player.
+  const stranger = testEnv.authenticatedContext("stranger-uid").firestore();
+  await assertFails(stranger.collection("special_predictions").doc("johan").get());
 });
 
 test("special_predictions stays hidden if no deadline has ever been configured", async () => {
@@ -583,10 +686,11 @@ test("special_predictions create fails once the deadline has passed", async () =
   await assertFails(johan.collection("special_predictions").doc("johan").set(samplePick()));
 });
 
-test("team_rosters is readable when signed in but never writable by clients", async () => {
-  await seed((db) =>
-    db.collection("team_rosters").doc("France").set({ team: "France", players: ["Kylian Mbappé"] })
-  );
+test("team_rosters is readable by a player but never writable by clients", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await db.collection("team_rosters").doc("France").set({ team: "France", players: ["Kylian Mbappé"] });
+  });
 
   const johan = testEnv.authenticatedContext("johan-uid").firestore();
   const unauth = testEnv.unauthenticatedContext().firestore();
@@ -598,8 +702,11 @@ test("team_rosters is readable when signed in but never writable by clients", as
   );
 });
 
-test("config is readable when signed in but never writable by clients", async () => {
-  await seed((db) => setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR)));
+test("config is readable by a player but never writable by clients", async () => {
+  await seed(async (db) => {
+    await bindUser(db, { uid: "johan-uid", userId: "johan", token: "johan-token" });
+    await setSpecialPredictionsDeadline(db, new Date(Date.now() + HOUR));
+  });
 
   const johan = testEnv.authenticatedContext("johan-uid").firestore();
   const unauth = testEnv.unauthenticatedContext().firestore();

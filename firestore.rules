@@ -2,8 +2,22 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Anonymous sign-in is open to anyone on the internet — the web app's
+    // Firebase config is public by design — so signedIn() alone is NOT an
+    // access decision. It only means "has an auth uid at all", which is the
+    // most any client can have before it presents a token.
     function signedIn() {
       return request.auth != null;
+    }
+
+    // A client only becomes a *player* once it holds an auth_links binding,
+    // which the rule below only lets it create by presenting a real token.
+    // Every read gate in this file is keyed to this rather than signedIn(),
+    // so the pool's data stays inside the group that was actually handed a
+    // link instead of being readable by any passing anonymous session.
+    function isPlayer() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/auth_links/$(request.auth.uid));
     }
 
     function isOwner(userId) {
@@ -47,16 +61,35 @@ service cloud.firestore {
     }
 
     // ---- users (fixed schema, read-only to clients) ----
+    // Every player can list this collection — the standings page needs
+    // everyone's display name. So it must NEVER hold anything secret:
+    // a user's token lives in tokens/ and user_links/ below, never here.
+    // Firestore rules can't hide individual fields from a document read, so
+    // "don't store it" is the only way to keep it out of clients' hands.
     match /users/{userId} {
-      allow read: if signedIn();
+      allow read: if isPlayer();
       allow write: if false; // admin only, via console / Admin SDK
     }
 
     // ---- tokens: token -> user_id reverse index (auth plumbing) ----
+    // Deliberately still signedIn() and not isPlayer(): this is what a client
+    // reads to *become* a player, before any binding exists. Safe because a
+    // get() requires already knowing the exact token string (128 random bits,
+    // see admin/seed.js) and the collection is never enumerable.
     match /tokens/{token} {
       allow get: if signedIn();  // must already know the exact token string
       allow list: if false;      // never enumerable
       allow write: if false;     // admin only
+    }
+
+    // ---- user_links: user_id -> token, so the admin can re-read a player's
+    // personal link later (admin/seed.js only prints it once, at creation).
+    // Closed to clients outright: the token IS the credential, so anything
+    // that can read it can impersonate that player. The Admin SDK bypasses
+    // rules, so the admin scripts still reach it.
+    match /user_links/{userId} {
+      allow read: if false;
+      allow write: if false;
     }
 
     // ---- auth_links: anonymous auth uid -> user_id binding (auth plumbing) ----
@@ -76,7 +109,7 @@ service cloud.firestore {
 
     // ---- matches (fixed schema, read-only to clients) ----
     match /matches/{matchId} {
-      allow read: if signedIn();
+      allow read: if isPlayer();
       allow write: if false; // admin only (fixture load + results entry)
     }
 
@@ -87,14 +120,19 @@ service cloud.firestore {
       // been saved yet (the normal case on a user's first visit) — there's
       // no resource.data to read then, so derive the owner from the doc ID
       // itself (format "{user_id}_{match_id}"; user_id never contains "_").
-      allow read: if signedIn() && (
+      allow read: if isPlayer() && (
         resource == null
           ? isOwner(predictionId.split('_')[0])
           : (isOwner(resource.data.user_id) || matchDeadlinePassed(resource.data.match_id))
       );
 
+      // hasOnly mirrors the update rule's affectedKeys check below: without
+      // it, create is the one hole through which a client could park
+      // arbitrary extra fields on a doc everyone else reads once it locks.
       allow create: if signedIn()
         && isOwner(request.resource.data.user_id)
+        && request.resource.data.keys().hasOnly(
+             ['prediction_id', 'user_id', 'match_id', 'predicted_score_a', 'predicted_score_b'])
         && predictionId == request.resource.data.user_id + '_' + request.resource.data.match_id
         && request.resource.data.match_id is string
         && isValidScore(request.resource.data.predicted_score_a)
@@ -122,7 +160,7 @@ service cloud.firestore {
     // (up to the first Round of 16 kickoff), not immediately frozen after
     // the first save.
     match /special_predictions/{userId} {
-      allow read: if isOwner(userId) || specialPredictionsDeadlinePassed(false);
+      allow read: if isOwner(userId) || (isPlayer() && specialPredictionsDeadlinePassed(false));
 
       allow create: if isOwner(userId)
         && request.resource.data.user_id == userId
@@ -131,9 +169,16 @@ service cloud.firestore {
         && request.resource.data.top_scorer_pick_team is string
         && !specialPredictionsDeadlinePassed(true);
 
+      // Same type checks as create, not just the affectedKeys allowlist:
+      // these picks are rendered into everyone's standings once revealed, so
+      // an update must not be able to swap a pick for a non-string (or an
+      // arbitrarily large one) that create would have rejected outright.
       allow update: if isOwner(userId)
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['champion_pick', 'top_scorer_pick', 'top_scorer_pick_team'])
+        && request.resource.data.champion_pick is string
+        && request.resource.data.top_scorer_pick is string
+        && request.resource.data.top_scorer_pick_team is string
         && !specialPredictionsDeadlinePassed(true);
 
       allow delete: if false;
@@ -143,13 +188,13 @@ service cloud.firestore {
     // Backs the champion/top-scorer picks form's dropdowns (see admin/seed.js)
     // so users pick from real team/player names instead of typing free text.
     match /team_rosters/{teamName} {
-      allow read: if signedIn();
+      allow read: if isPlayer();
       allow write: if false; // admin only, via admin/seed.js
     }
 
     // ---- config (small admin-set values, e.g. the special_predictions deadline) ----
     match /config/{configId} {
-      allow read: if signedIn();
+      allow read: if isPlayer();
       allow write: if false; // admin only
     }
   }

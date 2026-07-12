@@ -46,7 +46,15 @@ async function renameId(oldId, newId, newName) {
     process.exit(1);
   }
 
-  const oldUser = oldUserSnap.data();
+  // A token field on the user doc is legacy — admin/seed.js's migration moves
+  // it to the admin-only user_links/{user_id}. Read from there first, fall
+  // back to the old location for a database that hasn't been migrated yet,
+  // and never copy the field across to the new user doc either way.
+  const { token: legacyToken, ...oldUser } = oldUserSnap.data();
+  const oldLinkRef = db.collection("user_links").doc(oldId);
+  const oldLinkSnap = await oldLinkRef.get();
+  const token = oldLinkSnap.exists ? oldLinkSnap.data().token : legacyToken;
+
   const name = newName ?? oldUser.name;
 
   // 1. Copy the user doc under the new id.
@@ -54,8 +62,9 @@ async function renameId(oldId, newId, newName) {
 
   // 2. Point the existing token at the new id — the token value itself
   // doesn't change, so nobody's link breaks.
-  if (oldUser.token) {
-    await db.collection("tokens").doc(oldUser.token).update({ user_id: newId });
+  if (token) {
+    await db.collection("tokens").doc(token).update({ user_id: newId });
+    await db.collection("user_links").doc(newId).set({ token });
   }
 
   // 3. Re-point every auth_links binding (one per device) at the new id.
@@ -92,6 +101,9 @@ async function renameId(oldId, newId, newName) {
   }
   if (specialSnap.exists) {
     await specialSnap.ref.delete();
+  }
+  if (oldLinkSnap.exists) {
+    await oldLinkRef.delete();
   }
   await oldUserRef.delete();
 

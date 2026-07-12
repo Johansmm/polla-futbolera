@@ -176,6 +176,36 @@ async function seedTeamRosters(footballDataConfig) {
   console.log(`Seeded rosters for ${teams.length} teams.`);
 }
 
+// Earlier versions of this script stored each user's token on the user doc
+// itself. Every player can read that collection (the standings page lists
+// everyone by name), so that put every player's credential in every player's
+// browser — and, since anonymous sign-in is open to anyone, in reach of any
+// stranger who found the project. This moves any such token to the
+// admin-only user_links/{user_id} and strips the field.
+//
+// Nobody's link breaks: the token value itself doesn't change, and
+// tokens/{token} — what login actually reads — is untouched. Safe to re-run;
+// a user doc with no token field is left alone.
+async function migrateUserTokensOffUserDocs() {
+  const snap = await db.collection("users").get();
+  let moved = 0;
+
+  for (const userDoc of snap.docs) {
+    const { token } = userDoc.data();
+    if (!token) continue;
+
+    await db.collection("user_links").doc(userDoc.id).set({ token }, { merge: true });
+    await userDoc.ref.update({ token: admin.firestore.FieldValue.delete() });
+    moved++;
+  }
+
+  console.log(
+    moved
+      ? `Moved ${moved} token(s) off the users collection into admin-only user_links.`
+      : "No tokens on user docs — nothing to migrate."
+  );
+}
+
 async function seedUsers() {
   for (const user of USERS) {
     const userRef = db.collection("users").doc(user.user_id);
@@ -188,14 +218,18 @@ async function seedUsers() {
 
     const token = generateToken();
 
+    // The token is deliberately NOT written to the user doc — that one is
+    // readable by every player. It goes to tokens/{token} (the login lookup,
+    // gettable only by someone who already knows the string) and to
+    // user_links/{user_id} (admin-only, so the link can be re-read later).
     await userRef.set({
       user_id: user.user_id,
       name: user.name,
-      token,
       created_at: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     await db.collection("tokens").doc(token).set({ user_id: user.user_id });
+    await db.collection("user_links").doc(user.user_id).set({ token });
 
     console.log(`${user.name}: predict.html?token=${token}`);
   }
@@ -215,8 +249,12 @@ async function main() {
   const seededMatches = await seedMatches(resolvePhase, footballDataConfig);
   await seedSpecialPredictionsDeadline(seededMatches, trackedPhases);
   await seedTeamRosters(footballDataConfig);
+  await migrateUserTokensOffUserDocs();
   await seedUsers();
-  console.log("\nDone. Save the printed links now — tokens aren't printed again unless you add a brand-new user.");
+  console.log(
+    "\nDone. Save the printed links now — tokens aren't printed again unless you add a brand-new user." +
+      "\nAn existing player's link can always be re-read from user_links/{user_id} (admin-only)."
+  );
 }
 
 main().catch((err) => {
