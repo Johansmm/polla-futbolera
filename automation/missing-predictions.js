@@ -30,7 +30,34 @@ function formatRemaining(date) {
   return `${hh}h${mm}m`;
 }
 
-async function fetchUpcomingMatches() {
+// Firestore's matches collection holds no team names (see CLAUDE.md) — they
+// come from the Cloudflare Worker at read time, exactly as the web app does
+// it. Best-effort: a Worker hiccup just leaves the names blank rather than
+// failing the whole report, since the match id alone still identifies the
+// fixture.
+async function fetchWorkerMatchesById(workerUrl) {
+  try {
+    const res = await fetch(`${workerUrl}/matches`);
+    if (!res.ok) return new Map();
+    const data = await res.json();
+    return new Map((data.matches ?? []).map((m) => [m.id, m]));
+  } catch {
+    return new Map();
+  }
+}
+
+// admin/seed.js builds every match_id as "{phase}_{NN}", so the phase is
+// recoverable from the id alone. Only used as a fallback for the merged
+// phase — which is what the app itself scores by — so that a Worker outage
+// degrades the report's names but never its filtering.
+function phaseFromMatchId(matchId) {
+  return matchId.replace(/_\d+$/, "");
+}
+
+// Only the phases this pool actually tracks. admin/seed.js deliberately seeds
+// the whole competition, group stage included, so without this the report
+// would nag everyone about matches nobody is supposed to predict.
+async function fetchUpcomingTrackedMatches(mergeMatchData, trackedPhases, workerUrl) {
   const now = admin.firestore.Timestamp.fromDate(new Date());
   const cutoff = admin.firestore.Timestamp.fromDate(new Date(Date.now() + DAY_MS));
 
@@ -40,7 +67,11 @@ async function fetchUpcomingMatches() {
     .where("kickoff_at", "<=", cutoff)
     .get();
 
-  return snap.docs;
+  const workerMatchesById = await fetchWorkerMatchesById(workerUrl);
+
+  return snap.docs
+    .map((d) => mergeMatchData({ id: d.id, ...d.data() }, workerMatchesById))
+    .filter((match) => trackedPhases.has(match.phase ?? phaseFromMatchId(match.id)));
 }
 
 // null if the deadline isn't set yet, or isn't within the next 24 hours —
@@ -59,18 +90,17 @@ async function fetchUsers() {
   return snap.docs.map((d) => ({ id: d.id, name: d.data().name }));
 }
 
-function matchLabel(matchDoc) {
-  const match = matchDoc.data();
+function matchLabel(match) {
   const remaining = formatRemaining(match.kickoff_at.toDate());
-  return `${match.team_a ?? "?"} vs ${match.team_b ?? "?"} (${matchDoc.id}, ${remaining})`;
+  return `${match.team_a ?? "?"} vs ${match.team_b ?? "?"} (${match.id}, ${remaining})`;
 }
 
-async function missingItemsForUser(userId, matchDocs, specialDeadline) {
+async function missingItemsForUser(userId, matches, specialDeadline) {
   const items = [];
 
-  for (const matchDoc of matchDocs) {
-    const predSnap = await db.collection("predictions").doc(`${userId}_${matchDoc.id}`).get();
-    if (!predSnap.exists) items.push(matchLabel(matchDoc));
+  for (const match of matches) {
+    const predSnap = await db.collection("predictions").doc(`${userId}_${match.id}`).get();
+    if (!predSnap.exists) items.push(matchLabel(match));
   }
 
   if (specialDeadline) {
@@ -90,10 +120,17 @@ async function missingItemsForUser(userId, matchDocs, specialDeadline) {
 }
 
 async function main() {
-  const matchDocs = await fetchUpcomingMatches();
+  // Real ES modules loaded from CommonJS via dynamic import(), the same
+  // pattern admin/seed.js uses — so the stage/phase mapping and the Worker's
+  // URL each stay in exactly one place instead of being copied here.
+  const { mergeMatchData, STAGE_TO_PHASE } = await import("../js/worker-matches.mjs");
+  const { WORKER_URL } = await import("../js/worker-config.js");
+  const trackedPhases = new Set(Object.values(STAGE_TO_PHASE));
+
+  const matches = await fetchUpcomingTrackedMatches(mergeMatchData, trackedPhases, WORKER_URL);
   const specialDeadline = await fetchSpecialPredictionsDeadlineDueSoon();
 
-  if (!matchDocs.length && !specialDeadline) {
+  if (!matches.length && !specialDeadline) {
     console.log("Nothing locking in the next 24 hours.");
     return;
   }
@@ -102,7 +139,7 @@ async function main() {
   const lines = [];
 
   for (const user of users) {
-    const items = await missingItemsForUser(user.id, matchDocs, specialDeadline);
+    const items = await missingItemsForUser(user.id, matches, specialDeadline);
     if (items.length) {
       lines.push(`* ${user.name}: ${items.join(", ")}`);
     }

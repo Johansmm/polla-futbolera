@@ -331,7 +331,11 @@ async function main() {
   let matches;
   let predictions;
   try {
-    matches = await fetchMatches();
+    // admin/seed.js seeds the whole competition, not just the phases this
+    // pool plays, so most of what fetchMatches() returns is never rendered.
+    // Narrowing here before fetchPredictions() below is what keeps that from
+    // costing one Firestore read per unplayable fixture on every page load.
+    matches = (await fetchMatches()).filter((match) => PHASE_ORDER.includes(match.phase));
     predictions = await fetchPredictions(userId, matches);
   } catch (err) {
     showRetry(statusEl, "Couldn't load the matches.", () => window.location.reload());

@@ -62,7 +62,12 @@ export function scoreMatchBreakdown(prediction, match, isFinished, matchOutcomeP
   return { points: outcomePoints * phaseMultiplier, exactScoreHit };
 }
 
+// champion is null until the Final produces one (see deriveChampion) — the
+// finalist tier still pays out in the meantime, so this is worth calling as
+// soon as the Final has teams. Guards an unset pick explicitly, or a missing
+// pick would match a null champion and score the top tier.
 export function calculateChampionPoints(championPick, { champion, finalists }, championConfig) {
+  if (!championPick) return 0;
   if (championPick === champion) return championConfig.exact_champion;
   if (finalists.includes(championPick)) return championConfig.finalist;
   return 0;
@@ -142,22 +147,38 @@ export function finishedMatches(matches) {
 
 // Champion/finalists aren't stored anywhere (see CLAUDE.md's schema notes)
 // — derived from the final match's team_a/team_b (reaching the final) and
-// score (winning it, once decisive), read through effectiveScore() so a
-// live scoreline produces a provisional champion during the match, same as
-// scoreMatchBreakdown already does for match points. championIsFinal tells
-// callers (standings-logic.mjs) whether that champion came from the
-// confirmed real score or is still just the live-derived leader — a no-op
-// distinction once real_score_a is set.
+// who won it. championIsFinal tells callers (standings-logic.mjs) whether
+// that champion is confirmed or still provisional.
+//
+// A *finished* Final is read from `winner` (js/worker-matches.mjs), never
+// from real_score_a/b: those deliberately exclude shootout goals, so a Final
+// settled on penalties is level on the scoreline the pool grades predictions
+// against while still having a real champion.
+//
+// An *in-progress* Final has no winner yet, so a decisive live scoreline
+// stands in provisionally — same as scoreMatchBreakdown already does for
+// match points — and is superseded the moment the match finishes.
 export function deriveChampion(matches) {
   const final = matches.find((m) => m.phase === "final");
   if (!final) return { champion: null, finalists: [], championIsFinal: false };
 
   const finalists = [final.team_a, final.team_b].filter(Boolean);
+  const championIsFinal = final.real_score_a != null && final.real_score_b != null;
+
+  // `winner` is set once the match is over and is the only signal that
+  // survives a shootout, so it wins whenever it's there.
+  const declaredWinner =
+    final.winner === "a" ? final.team_a : final.winner === "b" ? final.team_b : null;
+  if (declaredWinner) return { champion: declaredWinner, finalists, championIsFinal };
+
+  // No declared winner: either the Final is still being played (a decisive
+  // live scoreline stands in provisionally, same as scoreMatchBreakdown does
+  // for match points), or it's over and level with the shootout not yet
+  // reported — in which case there is genuinely no champion to name yet.
   const effective = effectiveScore(final);
   const decisive =
     effective.real_score_a != null && effective.real_score_b != null && effective.real_score_a !== effective.real_score_b;
   const champion = decisive ? (effective.real_score_a > effective.real_score_b ? final.team_a : final.team_b) : null;
-  const championIsFinal = final.real_score_a != null && final.real_score_b != null;
 
   return { champion, finalists, championIsFinal };
 }

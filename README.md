@@ -85,6 +85,21 @@ this user's predictions." Multiple devices for the same person just create
 independent binding docs — no coordination needed. See `firestore.rules` and
 `CLAUDE.md` for the full design rationale.
 
+Two consequences worth spelling out, because the whole model rests on them:
+
+- **The token is the credential, so it is never stored anywhere a client can
+  read.** It lives in `tokens/{token}` (which you can only `get` if you already
+  know the exact string — the collection is not enumerable) and in
+  `user_links/{user_id}` (admin-only, so the organizer can re-read someone's
+  link later). It is deliberately *not* a field on `users/{user_id}`, because
+  the standings page lists every player by name and therefore every player can
+  read that collection.
+- **Being signed in is not the same as being in the pool.** Anonymous sign-in
+  is open to anyone on the internet — the Firebase web config is public by
+  design — so `request.auth != null` proves nothing. Every read rule instead
+  requires an `auth_links` binding, which can only be created by presenting a
+  real token.
+
 ## Setup (one-time)
 
 1. **Create the Firebase project**
@@ -334,11 +349,14 @@ API_KEY=your-football-data.org-token
   on the next request, and every client picks it up automatically. Matches
   also lock purely by `kickoff_at` (enforced in `firestore.rules`) — there's
   no admin override to force a match locked early.
-- **Regenerate a user's token** (e.g. they lost their link): in the Console,
+- **Re-read someone's link** (they lost it, no rotation needed): read
+  `user_links/{user_id}.token` in the Console. That collection is admin-only —
+  no client can read it, which is exactly why the token can live there.
+- **Regenerate a user's token** (e.g. their link leaked): in the Console,
   delete `tokens/{oldToken}`, create `tokens/{newToken} → { user_id }`, and
-  update `users/{user_id}.token` to the new value. If the old link may have
-  leaked to someone else, also delete that user's docs under `auth_links`
-  (query by `user_id` in the Console) to force every device to re-bind.
+  set `user_links/{user_id}.token` to the new value. Then delete that user's
+  docs under `auth_links` (query by `user_id` in the Console) to force every
+  device to re-bind.
 - **Add a new user after launch**: add them to `USERS` in `admin/seed.js` and
   re-run `node seed.js` — existing users are skipped, so their tokens don't change.
 - **Pick up new or rescheduled matches later** (e.g. the bracket for the next

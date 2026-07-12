@@ -44,13 +44,25 @@ export function selectScorableMatches(matches, scoringConfig) {
 // standings.js's poll loop calls this on every tick, cheap and network-free
 // (just comparing already-loaded kickoff_at/real_score_a against Date.now()),
 // to decide whether a Worker refetch could possibly change anything shown.
-// True for a match that has kicked off but has no admin-entered result yet —
-// covers both "about to go live" (still SCHEDULED per last fetch) and
-// "already live" alike, since both need another Worker call to progress.
-// Once every match's real_score_a is set, this goes false for good and the
-// poll loop stops refetching entirely — nothing left that could change.
-export function hasMatchNeedingRefresh(matches) {
-  return matches.some((match) => isMatchLocked(match) && match.real_score_a == null);
+// True for a match that has kicked off but has no result yet — covers both
+// "about to go live" (still SCHEDULED per last fetch) and "already live"
+// alike, since both need another Worker call to progress. Once every such
+// match has a result, this goes false for good and the poll loop stops
+// refetching entirely — nothing left that could change.
+//
+// A match whose phase this pool doesn't score (the competition's earlier
+// rounds are seeded too, see admin/seed.js) can never change anything shown,
+// so it doesn't keep the loop alive — otherwise a single postponed one would
+// poll forever. A match with no phase *at all* still does, though: that means
+// the Worker hasn't resolved it yet, and giving up on it would strand the
+// page permanently on a Worker outage that later recovers.
+export function hasMatchNeedingRefresh(matches, scoringConfig) {
+  return matches.some(
+    (match) =>
+      isMatchLocked(match) &&
+      match.real_score_a == null &&
+      (match.phase == null || scoringConfig.phase_multipliers[match.phase] != null)
+  );
 }
 
 // Shared by every breakdown section (match-by-match and special picks
@@ -61,7 +73,9 @@ export function hasMatchNeedingRefresh(matches) {
 function rankEntries(rawEntries) {
   const maxPoints = rawEntries.reduce((max, e) => (e.points != null && e.points > max ? e.points : max), -Infinity);
   return rawEntries
-    .map((e) => ({ ...e, top: e.points != null && e.points === maxPoints }))
+    // A section where everyone scored 0 has no leader to crown — without
+    // this, they'd all tie at the maximum and every row would get the crown.
+    .map((e) => ({ ...e, top: maxPoints > 0 && e.points === maxPoints }))
     .sort((a, b) => {
       if (a.points == null && b.points == null) return a.name.localeCompare(b.name);
       if (a.points == null) return 1;
@@ -145,10 +159,13 @@ export function computeStandingsFromData({
     }
 
     const pick = specialPicks[user.user_id];
-    const championPoints =
-      pick && champion
-        ? calculateChampionPoints(pick.champion_pick, { champion, finalists }, scoringConfig.special_predictions.champion)
-        : 0;
+    // Deliberately not gated on `champion` being known: the finalist tier
+    // only depends on the Final's line-up, so it pays out as soon as that's
+    // set — and a Final settled on penalties has finalists and a champion
+    // but no decisive scoreline at all (see deriveChampion).
+    const championPoints = pick
+      ? calculateChampionPoints(pick.champion_pick, { champion, finalists }, scoringConfig.special_predictions.champion)
+      : 0;
 
     const topScorerPoints =
       pick && topScorer
@@ -259,6 +276,9 @@ export function computeStandingsFromData({
     rows,
     specialRevealed,
     championDecided: Boolean(champion),
+    // Champion points can already be scoring (the finalist tier) even with
+    // no champion — standings.js's pendingNote needs to tell those apart.
+    finalistsKnown: finalists.length > 0,
     championIsFinal,
     topScorerKnown: Boolean(topScorer),
     topScorerIsFinal,

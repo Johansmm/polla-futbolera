@@ -410,11 +410,134 @@ test("computeStandingsFromData reports no known top scorer before a single goal 
   assert.equal(result.rows[0].topScorerPoints, 0);
 });
 
+// The end-to-end version of the deriveChampion penalty regression: a Final
+// settled on penalties is level on real_score_a/b by design, which used to
+// leave every player on 0 champion points — not just the champion tier, but
+// the finalist tier with it, since the whole call was gated on a champion
+// being known.
+test("computeStandingsFromData scores a Final that was decided on penalties", () => {
+  const penaltyFinal = mergeMatchData(
+    { id: "final_01", match_id: "final_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 3 },
+    toSourceMap([
+      {
+        id: 3,
+        stage: "FINAL",
+        status: "FINISHED",
+        homeTeam: { name: "Argentina", crest: null },
+        awayTeam: { name: "France", crest: null },
+        score: {
+          duration: "PENALTY_SHOOTOUT",
+          fullTime: { home: 5, away: 3 },
+          regularTime: { home: 1, away: 1 },
+          extraTime: { home: 0, away: 0 },
+          penalties: { home: 4, away: 2 },
+        },
+      },
+    ])
+  );
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users: [
+      { user_id: "alice", name: "Alice" },
+      { user_id: "bob", name: "Bob" },
+    ],
+    matches: [penaltyFinal],
+    tournamentResults: null,
+    predictionsByMatch: {},
+    specialPicks: {
+      alice: { champion_pick: "Argentina" }, // the actual (shootout) champion
+      bob: { champion_pick: "France" }, // reached the Final, lost it
+    },
+    specialRevealed: true,
+    scorers: [],
+  });
+
+  assert.equal(result.championDecided, true);
+  assert.equal(result.championIsFinal, true);
+
+  const alice = result.rows.find((r) => r.userId === "alice");
+  const bob = result.rows.find((r) => r.userId === "bob");
+  assert.equal(alice.championPoints, 8); // exact champion, despite the level scoreline
+  assert.equal(bob.championPoints, 3); // finalist
+
+  // The scoreline the pool grades predictions against still excludes the
+  // shootout — a predicted 1-1 draw is an exact hit here.
+  assert.equal(penaltyFinal.real_score_a, 1);
+  assert.equal(penaltyFinal.real_score_b, 1);
+});
+
+// The finalist tier only depends on the Final's line-up, so it must pay out
+// while the Final is still unplayed — it used to be suppressed entirely until
+// a champion existed.
+test("computeStandingsFromData awards finalist points before the Final is played", () => {
+  const unplayedFinal = mergeMatchData(
+    { id: "final_01", match_id: "final_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 3 },
+    toSourceMap([
+      {
+        id: 3,
+        stage: "FINAL",
+        status: "SCHEDULED",
+        homeTeam: { name: "Argentina", crest: null },
+        awayTeam: { name: "France", crest: null },
+        score: { fullTime: { home: null, away: null } },
+      },
+    ])
+  );
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users: [{ user_id: "alice", name: "Alice" }],
+    matches: [unplayedFinal],
+    tournamentResults: null,
+    predictionsByMatch: {},
+    specialPicks: { alice: { champion_pick: "France" } },
+    specialRevealed: true,
+    scorers: [],
+  });
+
+  assert.equal(result.championDecided, false);
+  assert.equal(result.finalistsKnown, true);
+  assert.equal(result.rows[0].championPoints, 3);
+});
+
+// Everyone tying on 0 is not a five-way lead — the crown marks an actual
+// best pick, so a section nobody scored in has no leader at all.
+test("computeStandingsFromData crowns nobody in a section where everyone scored 0", () => {
+  const { finishedR16 } = buildScenario(); // Canada 2-1 Morocco
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users: [
+      { user_id: "alice", name: "Alice" },
+      { user_id: "bob", name: "Bob" },
+    ],
+    matches: [finishedR16],
+    tournamentResults: null,
+    predictionsByMatch: {
+      r16_01: {
+        alice: { predicted_score_a: 0, predicted_score_b: 3 }, // wrong winner
+        bob: { predicted_score_a: 1, predicted_score_b: 2 }, // wrong winner
+      },
+    },
+    specialPicks: {},
+    specialRevealed: false,
+    scorers: [],
+  });
+
+  const [matchSection] = result.matchSections;
+  assert.deepEqual(
+    matchSection.entries.map((e) => e.points),
+    [0, 0]
+  );
+  assert.ok(matchSection.entries.every((e) => e.top === false));
+});
+
 // hasMatchNeedingRefresh backs standings.js's poll loop: a network-free
 // check deciding whether a Worker refetch is even worth doing.
 test("hasMatchNeedingRefresh is false when nothing has kicked off yet", () => {
   const { upcomingR16 } = buildScenario();
-  assert.equal(hasMatchNeedingRefresh([upcomingR16]), false);
+  assert.equal(hasMatchNeedingRefresh([upcomingR16], SCORING_CONFIG), false);
 });
 
 test("hasMatchNeedingRefresh is true for a match that's kicked off with no result yet", () => {
@@ -431,12 +554,44 @@ test("hasMatchNeedingRefresh is true for a match that's kicked off with no resul
       },
     ])
   );
-  assert.equal(hasMatchNeedingRefresh([live]), true);
+  assert.equal(hasMatchNeedingRefresh([live], SCORING_CONFIG), true);
 });
 
 test("hasMatchNeedingRefresh is false once every kicked-off match has a real score", () => {
   const { finishedR16 } = buildScenario();
-  assert.equal(hasMatchNeedingRefresh([finishedR16]), false);
+  assert.equal(hasMatchNeedingRefresh([finishedR16], SCORING_CONFIG), false);
+});
+
+// admin/seed.js seeds the whole competition, so a phase this pool doesn't
+// score can sit locked and result-less forever (a postponed group match, say)
+// — it can't change anything on screen, so it must not keep the loop running.
+test("hasMatchNeedingRefresh ignores a locked, result-less match in an unscored phase", () => {
+  const groupMatch = mergeMatchData(
+    { id: "GROUP_STAGE_01", match_id: "GROUP_STAGE_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 7 },
+    toSourceMap([
+      {
+        id: 7,
+        stage: "GROUP_STAGE",
+        status: "POSTPONED",
+        homeTeam: { name: "Qatar", crest: null },
+        awayTeam: { name: "Ecuador", crest: null },
+        score: { fullTime: { home: null, away: null } },
+      },
+    ])
+  );
+  assert.equal(hasMatchNeedingRefresh([groupMatch], SCORING_CONFIG), false);
+});
+
+// ...but a match the Worker hasn't resolved at all has no phase to judge it
+// by, and giving up on it would strand the page for good on a Worker outage
+// that later recovers.
+test("hasMatchNeedingRefresh still refreshes a locked match the Worker hasn't resolved yet", () => {
+  const unresolved = mergeMatchData(
+    { id: "r16_09", match_id: "r16_09", kickoff_at: new Date(Date.now() - DAY), source_match_id: 99 },
+    new Map()
+  );
+  assert.equal(unresolved.phase, undefined);
+  assert.equal(hasMatchNeedingRefresh([unresolved], SCORING_CONFIG), true);
 });
 
 // selectNewlyScorableMatches backs the poll loop's one-time-per-match

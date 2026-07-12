@@ -8,10 +8,11 @@ const assert = require("node:assert/strict");
 let resolvePhase;
 let buildResultFields;
 let buildLiveScoreFields;
+let buildWinnerField;
 let mergeMatchData;
 
 test.before(async () => {
-  ({ resolvePhase, buildResultFields, buildLiveScoreFields, mergeMatchData } = await import(
+  ({ resolvePhase, buildResultFields, buildLiveScoreFields, buildWinnerField, mergeMatchData } = await import(
     "../js/worker-matches.mjs"
   ));
 });
@@ -76,6 +77,76 @@ test("buildResultFields excludes penalty-shootout goals from the stored result",
     },
   };
   assert.deepEqual(buildResultFields(apiMatch), { real_score_a: 1, real_score_b: 1 });
+});
+
+// The counterpart to buildResultFields' penalty exclusion above: the
+// shootout stays out of the score predictions are graded against, but it's
+// still the only thing that says who actually won — without `winner`, a
+// Final settled on penalties has no champion at all (scoring-logic.mjs's
+// deriveChampion).
+test("buildWinnerField is empty for a match that hasn't finished", () => {
+  assert.deepEqual(buildWinnerField({ status: "IN_PLAY", score: { fullTime: { home: 1, away: 0 } } }), {});
+});
+
+test("buildWinnerField reads a decisive result straight off the scoreline", () => {
+  const apiMatch = {
+    status: "FINISHED",
+    score: { fullTime: { home: 2, away: 1 }, regularTime: { home: 2, away: 1 } },
+  };
+  assert.deepEqual(buildWinnerField(apiMatch), { winner: "a" });
+});
+
+test("buildWinnerField counts extra time, which decides the result outright", () => {
+  const apiMatch = {
+    status: "FINISHED",
+    score: {
+      fullTime: { home: 2, away: 3 },
+      regularTime: { home: 2, away: 2 },
+      extraTime: { home: 0, away: 1 },
+    },
+  };
+  assert.deepEqual(buildWinnerField(apiMatch), { winner: "b" });
+});
+
+test("buildWinnerField falls back to the shootout when the match ended level", () => {
+  const apiMatch = {
+    status: "FINISHED",
+    score: {
+      duration: "PENALTY_SHOOTOUT",
+      fullTime: { home: 7, away: 6 },
+      regularTime: { home: 1, away: 1 },
+      extraTime: { home: 0, away: 0 },
+      penalties: { home: 6, away: 5 },
+    },
+  };
+  // The scoreline the pool grades against stays 1-1 (buildResultFields), but
+  // the home side is unambiguously the winner.
+  assert.deepEqual(buildWinnerField(apiMatch), { winner: "a" });
+});
+
+test("mergeMatchData carries the shootout winner without letting it into the scores", () => {
+  const merged = mergeMatchData(
+    { id: "final_01", match_id: "final_01", kickoff_at: new Date(), source_match_id: 9 },
+    toSourceMap([
+      {
+        id: 9,
+        stage: "FINAL",
+        status: "FINISHED",
+        homeTeam: { name: "Argentina", crest: null },
+        awayTeam: { name: "France", crest: null },
+        score: {
+          fullTime: { home: 5, away: 3 },
+          regularTime: { home: 1, away: 1 },
+          extraTime: { home: 0, away: 0 },
+          penalties: { home: 4, away: 2 },
+        },
+      },
+    ])
+  );
+
+  assert.equal(merged.real_score_a, 1);
+  assert.equal(merged.real_score_b, 1);
+  assert.equal(merged.winner, "a");
 });
 
 test("buildLiveScoreFields is empty before kickoff", () => {

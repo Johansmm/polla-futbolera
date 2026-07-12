@@ -171,7 +171,7 @@ function computeStandings(state) {
 // hasMatchNeedingRefresh's doc comment. Mutates state in place so setInterval
 // can just keep calling this with the same object.
 async function refreshState(state) {
-  if (!hasMatchNeedingRefresh(state.matches)) return false;
+  if (!hasMatchNeedingRefresh(state.matches, state.scoringConfig)) return false;
 
   const workerData = await fetchWorkerMatches();
   // An empty matches result means the Worker call itself failed (see
@@ -199,6 +199,7 @@ async function refreshState(state) {
 function pendingNote({
   specialRevealed,
   championDecided,
+  finalistsKnown,
   championIsFinal,
   topScorerKnown,
   topScorerIsFinal,
@@ -210,13 +211,19 @@ function pendingNote({
     notes.push("Champion and top scorer picks are still hidden — they'll count once the pick deadline passes.");
   } else {
     const missing = [];
-    if (!championDecided) missing.push("the champion hasn't been decided yet");
+    // Keyed to finalistsKnown, not championDecided: the champion pick starts
+    // scoring (its finalist tier) as soon as the Final has a line-up, well
+    // before anyone has won it — so "match points only" stops being true then.
+    if (!finalistsKnown) missing.push("the finalists aren't known yet");
     // Once a goal has been scored anywhere, topScorerKnown flips true and
     // top scorer points come from the Worker's live /scorers list instead —
     // "hasn't been set yet" no longer applies, but those points remain
     // provisional (see the note below) until the admin confirms the result.
     if (!topScorerKnown) missing.push("the tournament top scorer hasn't been set yet");
     if (missing.length) notes.push(`Match points only for now — ${missing.join(" and ")}.`);
+    if (finalistsKnown && !championDecided) {
+      notes.push("Only the finalist tier counts so far — the Final hasn't produced a champion yet.");
+    }
     if (championDecided && !championIsFinal) {
       notes.push("Champion points are provisional — the Final is still being played.");
     }
