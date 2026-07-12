@@ -64,6 +64,13 @@ Still deprioritized:
   - A user can only write to their own predictions (matched by token → user_id)
   - Predictions from other users are hidden until the match's kickoff time
   - No writes allowed to a match's predictions once its `kickoff_at` has passed
+  - Reads require being a *player* (holding an `auth_links` binding, which can
+    only be created by presenting a real token) — **not** merely being signed
+    in. Anonymous sign-in is open to anyone on the internet, so
+    `request.auth != null` is not an access decision, it just means "has a uid".
+  - Nothing readable by clients may contain a token (see the `users` schema
+    below) — the token *is* the credential, so exposing one is full account
+    takeover of that player.
 
 ## Code conventions
 
@@ -80,10 +87,35 @@ Still deprioritized:
 ### `users`
 | Field | Type | Notes |
 |---|---|---|
-| `user_id` | string | Internal, permanent, never changes |
+| `user_id` | string | Internal, permanent, never changes. Must not contain `_` — `firestore.rules` splits prediction doc ids (`{user_id}_{match_id}`) on it |
 | `name` | string | Display name |
-| `token` | string | Regenerable by admin without losing user's data — token is decoupled from user_id and predictions |
 | `created_at` | timestamp | |
+
+**No `token` field, deliberately.** Every player can read this collection (the
+standings page lists everyone by name), and Firestore rules can't hide a single
+field from a document read — so a token stored here would be a token handed to
+every player, and (since anonymous sign-in is open to anyone) to anyone who
+found the project at all. The token lives in `tokens/{token}` for the login
+lookup and in `user_links/{user_id}` for the admin; see both below.
+
+### `user_links` (admin-only, doc id = user_id)
+| Field | Type | Notes |
+|---|---|---|
+| `token` | string | The user's current token, so the organizer can re-read their personal link. Regenerable without losing any data — the token is decoupled from `user_id` and from predictions |
+
+Closed to clients outright in `firestore.rules` (`read`/`write`: `if false`);
+only the Admin SDK, which bypasses rules, reaches it. The token is the
+credential, so anything that can read it can impersonate that player.
+
+### `tokens` (auth plumbing, doc id = the token itself)
+| Field | Type | Notes |
+|---|---|---|
+| `user_id` | string | Reverse index the client reads to turn its URL token into a user_id |
+
+`get`-only and never enumerable (`list`: `if false`), so it's only readable by
+someone who already knows the exact 128-bit token string. This is the one
+collection still gated on plain `signedIn()` rather than "is a player" — it's
+what a client reads in order to *become* a player, before any binding exists.
 
 ### `matches`
 | Field | Type | Notes |
@@ -93,12 +125,22 @@ Still deprioritized:
 | `source_match_id` | number | The match-data source's own id for this fixture (e.g. football-data.org's numeric match id), used to look up the corresponding entry in the Worker's response. Deliberately not named after the source itself — a future source change only means updating the value, not every reference to the field's name |
 
 Everything else about a match — `phase`, `team_a`/`team_b`, crest URLs,
-`real_score_a`/`real_score_b`, `live_score_a`/`live_score_b` — comes from
-the Cloudflare Worker proxy at read time, merged in by
+`real_score_a`/`real_score_b`, `winner`, `live_score_a`/`live_score_b` — comes
+from the Cloudflare Worker proxy at read time, merged in by
 `js/worker-matches.mjs`; none of it is stored in Firestore. `locked` isn't
 stored either: `firestore.rules`' `matchDeadlinePassed()` and
 `js/lock-logic.mjs`'s `isMatchLocked()` both derive it purely from
 `kickoff_at`.
+
+`winner` (`"a"`/`"b"`/`null`) deserves its own note, since it's the one merged
+field that isn't just a restatement of the scoreline. `real_score_a`/`b`
+deliberately **exclude** penalty-shootout goals — the pool grades predictions
+on the score through extra time, so a correctly-predicted draw stays a draw.
+But a knockout tie is still settled by the shootout, and `winner` is the only
+field that carries that. Without it, a Final decided on penalties looks like a
+draw with no winner at all, and `deriveChampion` can't name a champion — which
+would zero out the champion pick for everyone. Anything asking "who actually
+went through" must read `winner`, never the scoreline.
 
 ### `predictions`
 | Field | Type | Notes |
@@ -226,18 +268,26 @@ has passed) directly and computes points itself using the pure functions in
 `js/scoring-logic.mjs`, parameterized by `scoring_config.json`. This avoids
 ever needing an admin step to "recalculate" anything, and there's no
 derived data that can go stale relative to the raw predictions. Champion/
-finalists/semifinalists are derived from the `final`/`sf` matches' scores
-at read time. While a match is in progress (a `live_score_a`/
-`live_score_b` is set but `real_score_a`/`real_score_b` aren't yet), the
-standings page shows provisional points sourced from the live score
-instead, via `scoring-logic.mjs`'s `isMatchLive`/`effectiveScore` — never
-stored, and superseded the moment the real score is set. This applies to
-the champion pick's `exact_champion` tier too: `deriveChampion` reads the
-Final match through `effectiveScore()`, so a decisive live scoreline
-produces a provisional champion during the match itself, superseded the
-moment `real_score_a`/`real_score_b` are set — the `finalist` tier needs no
-such handling, since it only depends on the Final's `team_a`/`team_b`
-being populated, unaffected by the Final's own score.
+finalists/semifinalists are derived from the `final`/`sf` matches at read
+time. While a match is in progress (a `live_score_a`/`live_score_b` is set
+but `real_score_a`/`real_score_b` aren't yet), the standings page shows
+provisional points sourced from the live score instead, via
+`scoring-logic.mjs`'s `isMatchLive`/`effectiveScore` — never stored, and
+superseded the moment the real score is set.
+
+The champion pick's two tiers resolve on different signals, and mixing them
+up is how the penalty-shootout bug happened:
+
+- `exact_champion` comes from the Final's **`winner`** field (see the
+  `matches` notes above), *not* its scoreline — a Final settled on penalties
+  is level on `real_score_a`/`b` by design, so scoreline-only logic finds no
+  champion there at all. While the Final is still being played there is no
+  `winner` yet, so a decisive live scoreline stands in provisionally
+  (`effectiveScore()`), superseded the moment the match finishes.
+- `finalist` depends only on the Final's `team_a`/`team_b` being populated,
+  so it starts paying out as soon as the Final has a line-up — well before
+  anyone has won it, and regardless of how it's eventually decided. It must
+  never be gated on a champion being known.
 
 Top scorer points work the same way, but the live signal is the *normal*
 case, not a stand-in for a step the admin is expected to take: the Worker's
