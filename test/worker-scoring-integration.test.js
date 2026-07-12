@@ -175,6 +175,10 @@ test("deriveChampion and deriveSemifinalists work off Worker-merged team names",
   );
 
   const matches = [final, semifinal];
-  assert.deepEqual(deriveChampion(matches), { champion: "Argentina", finalists: ["Argentina", "Brazil"] });
+  assert.deepEqual(deriveChampion(matches), {
+    champion: "Argentina",
+    finalists: ["Argentina", "Brazil"],
+    championIsFinal: true,
+  });
   assert.deepEqual(deriveSemifinalists(matches), ["Argentina", "France"]);
 });

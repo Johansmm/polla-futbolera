@@ -163,7 +163,14 @@ async function refreshState(state) {
   return true;
 }
 
-function pendingNote({ specialRevealed, championDecided, topScorerKnown, topScorerIsFinal, anyMatchLive }) {
+function pendingNote({
+  specialRevealed,
+  championDecided,
+  championIsFinal,
+  topScorerKnown,
+  topScorerIsFinal,
+  anyMatchLive,
+}) {
   const notes = [];
   if (anyMatchLive) notes.push("Provisional standings — a match is in progress.");
   if (!specialRevealed) {
@@ -177,6 +184,9 @@ function pendingNote({ specialRevealed, championDecided, topScorerKnown, topScor
     // provisional (see the note below) until the admin confirms the result.
     if (!topScorerKnown) missing.push("the tournament top scorer hasn't been set yet");
     if (missing.length) notes.push(`Match points only for now — ${missing.join(" and ")}.`);
+    if (championDecided && !championIsFinal) {
+      notes.push("Champion points are provisional — the Final is still being played.");
+    }
     if (topScorerKnown && !topScorerIsFinal) {
       notes.push("Top scorer points are provisional — the tournament's official top scorer hasn't been confirmed yet.");
     }

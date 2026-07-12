@@ -142,17 +142,24 @@ export function finishedMatches(matches) {
 
 // Champion/finalists aren't stored anywhere (see CLAUDE.md's schema notes)
 // — derived from the final match's team_a/team_b (reaching the final) and
-// real score (winning it, once decisive).
+// score (winning it, once decisive), read through effectiveScore() so a
+// live scoreline produces a provisional champion during the match, same as
+// scoreMatchBreakdown already does for match points. championIsFinal tells
+// callers (standings-logic.mjs) whether that champion came from the
+// confirmed real score or is still just the live-derived leader — a no-op
+// distinction once real_score_a is set.
 export function deriveChampion(matches) {
   const final = matches.find((m) => m.phase === "final");
-  if (!final) return { champion: null, finalists: [] };
+  if (!final) return { champion: null, finalists: [], championIsFinal: false };
 
   const finalists = [final.team_a, final.team_b].filter(Boolean);
+  const effective = effectiveScore(final);
   const decisive =
-    final.real_score_a != null && final.real_score_b != null && final.real_score_a !== final.real_score_b;
-  const champion = decisive ? (final.real_score_a > final.real_score_b ? final.team_a : final.team_b) : null;
+    effective.real_score_a != null && effective.real_score_b != null && effective.real_score_a !== effective.real_score_b;
+  const champion = decisive ? (effective.real_score_a > effective.real_score_b ? final.team_a : final.team_b) : null;
+  const championIsFinal = final.real_score_a != null && final.real_score_b != null;
 
-  return { champion, finalists };
+  return { champion, finalists, championIsFinal };
 }
 
 // A team counts as a semifinalist just by appearing in an "sf"-phase match

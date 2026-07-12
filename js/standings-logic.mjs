@@ -93,7 +93,7 @@ export function computeStandingsFromData({
   const finishedIds = new Set(finished.map((m) => m.id));
 
   const anyMatchLive = matches.some(isMatchLive);
-  const { champion, finalists } = deriveChampion(matches);
+  const { champion, finalists, championIsFinal } = deriveChampion(matches);
   const semifinalists = deriveSemifinalists(matches);
 
   // config/tournament_results.top_scorer, once the admin sets it, is the
@@ -247,6 +247,7 @@ export function computeStandingsFromData({
     rows,
     specialRevealed,
     championDecided: Boolean(champion),
+    championIsFinal,
     topScorerKnown: Boolean(topScorer),
     topScorerIsFinal,
     anyMatchLive,

@@ -226,12 +226,18 @@ has passed) directly and computes points itself using the pure functions in
 `js/scoring-logic.mjs`, parameterized by `scoring_config.json`. This avoids
 ever needing an admin step to "recalculate" anything, and there's no
 derived data that can go stale relative to the raw predictions. Champion/
-finalists/semifinalists are derived from the `final`/`sf` matches' real
-scores at read time. While a match is in progress (a `live_score_a`/
+finalists/semifinalists are derived from the `final`/`sf` matches' scores
+at read time. While a match is in progress (a `live_score_a`/
 `live_score_b` is set but `real_score_a`/`real_score_b` aren't yet), the
 standings page shows provisional points sourced from the live score
 instead, via `scoring-logic.mjs`'s `isMatchLive`/`effectiveScore` — never
-stored, and superseded the moment the real score is set.
+stored, and superseded the moment the real score is set. This applies to
+the champion pick's `exact_champion` tier too: `deriveChampion` reads the
+Final match through `effectiveScore()`, so a decisive live scoreline
+produces a provisional champion during the match itself, superseded the
+moment `real_score_a`/`real_score_b` are set — the `finalist` tier needs no
+such handling, since it only depends on the Final's `team_a`/`team_b`
+being populated, unaffected by the Final's own score.
 
 Top scorer points work the same way, but the live signal is the *normal*
 case, not a stand-in for a step the admin is expected to take: the Worker's

@@ -134,6 +134,7 @@ test("computeStandingsFromData scores match and champion picks, ranks, and build
 
   assert.equal(result.totalScorableMatches, 2);
   assert.equal(result.championDecided, true);
+  assert.equal(result.championIsFinal, true);
   assert.equal(result.anyMatchLive, false);
 
   const alice = result.rows.find((r) => r.userId === "alice");
@@ -311,6 +312,52 @@ test("computeStandingsFromData derives provisional top scorer points from the li
   assert.equal(bob.topScorerPoints, 5); // top_3, no bonus — France isn't in this scenario's semifinalists
 
   assert.match(result.specialSections[1].title, /Current leader: Lionel Messi \(8 goals\)/);
+});
+
+// Live-derived champion points, sourced from the Final's live score, stand
+// in as a provisional signal until the admin confirms the result — issue
+// #64, the champion-pick counterpart to the top-scorer live test above.
+test("computeStandingsFromData derives provisional champion points from the Final's live score", () => {
+  const { finishedR16 } = buildScenario();
+  const liveFinal = mergeMatchData(
+    { id: "final_01", match_id: "final_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 3 },
+    toSourceMap([
+      {
+        id: 3,
+        stage: "FINAL",
+        status: "IN_PLAY",
+        homeTeam: { name: "Argentina", crest: null },
+        awayTeam: { name: "Brazil", crest: null },
+        score: { duration: "REGULAR", fullTime: { home: 1, away: 0 } },
+      },
+    ])
+  );
+  const users = [
+    { user_id: "alice", name: "Alice" },
+    { user_id: "bob", name: "Bob" },
+  ];
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches: [finishedR16, liveFinal],
+    tournamentResults: null,
+    predictionsByMatch: { r16_01: {} },
+    specialPicks: {
+      alice: { champion_pick: "Argentina" },
+      bob: { champion_pick: "Brazil" },
+    },
+    specialRevealed: true,
+  });
+
+  assert.equal(result.championDecided, true);
+  assert.equal(result.championIsFinal, false);
+  assert.equal(result.anyMatchLive, true);
+
+  const alice = result.rows.find((r) => r.userId === "alice");
+  const bob = result.rows.find((r) => r.userId === "bob");
+  assert.equal(alice.championPoints, 8); // provisional exact champion
+  assert.equal(bob.championPoints, 3); // still a finalist
 });
 
 test("computeStandingsFromData respects the admin-set top scorer once present, ignoring the live scorers list", () => {

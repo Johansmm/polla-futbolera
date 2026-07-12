@@ -297,12 +297,20 @@ test("effectiveScore passes the match through unchanged once finished or before 
 
 test("deriveChampion returns no champion when the final hasn't been played yet", () => {
   const matches = [{ phase: "final", team_a: "Argentina", team_b: "France", real_score_a: null, real_score_b: null }];
-  assert.deepEqual(deriveChampion(matches), { champion: null, finalists: ["Argentina", "France"] });
+  assert.deepEqual(deriveChampion(matches), {
+    champion: null,
+    finalists: ["Argentina", "France"],
+    championIsFinal: false,
+  });
 });
 
 test("deriveChampion declares the winner once the final has a decisive score", () => {
   const matches = [{ phase: "final", team_a: "Argentina", team_b: "France", real_score_a: 3, real_score_b: 0 }];
-  assert.deepEqual(deriveChampion(matches), { champion: "Argentina", finalists: ["Argentina", "France"] });
+  assert.deepEqual(deriveChampion(matches), {
+    champion: "Argentina",
+    finalists: ["Argentina", "France"],
+    championIsFinal: true,
+  });
 });
 
 // A drawn final score (e.g. still awaiting the penalty-shootout result to be
@@ -310,14 +318,88 @@ test("deriveChampion declares the winner once the final has a decisive score", (
 // same "0 diff isn't a real result" pitfall scoreMatch already guards against.
 test("deriveChampion awards no champion when the final's real score is a draw", () => {
   const matches = [{ phase: "final", team_a: "Argentina", team_b: "France", real_score_a: 1, real_score_b: 1 }];
-  assert.deepEqual(deriveChampion(matches), { champion: null, finalists: ["Argentina", "France"] });
+  assert.deepEqual(deriveChampion(matches), {
+    champion: null,
+    finalists: ["Argentina", "France"],
+    championIsFinal: true,
+  });
 });
 
 test("deriveChampion returns no finalists when the final match doesn't exist yet", () => {
   assert.deepEqual(deriveChampion([{ phase: "sf", team_a: "Argentina", team_b: "Croatia" }]), {
     champion: null,
     finalists: [],
+    championIsFinal: false,
   });
+});
+
+// Live/provisional champion derivation — issue #64, the champion-pick
+// counterpart to deriveTopScorers' live signal.
+test("deriveChampion derives a provisional champion from a decisive live score with no real score yet", () => {
+  const matches = [
+    {
+      phase: "final",
+      team_a: "Argentina",
+      team_b: "France",
+      live_score_a: 2,
+      live_score_b: 1,
+      real_score_a: null,
+      real_score_b: null,
+    },
+  ];
+  assert.deepEqual(deriveChampion(matches), {
+    champion: "Argentina",
+    finalists: ["Argentina", "France"],
+    championIsFinal: false,
+  });
+});
+
+test("deriveChampion awards no champion while the live score is tied, same as a tied real score", () => {
+  const matches = [
+    {
+      phase: "final",
+      team_a: "Argentina",
+      team_b: "France",
+      live_score_a: 1,
+      live_score_b: 1,
+      real_score_a: null,
+      real_score_b: null,
+    },
+  ];
+  assert.deepEqual(deriveChampion(matches), {
+    champion: null,
+    finalists: ["Argentina", "France"],
+    championIsFinal: false,
+  });
+});
+
+test("deriveChampion prefers the confirmed real score over a lingering live score once both are set", () => {
+  const matches = [
+    {
+      phase: "final",
+      team_a: "Argentina",
+      team_b: "France",
+      live_score_a: 2,
+      live_score_b: 1,
+      real_score_a: 2,
+      real_score_b: 2,
+    },
+  ];
+  assert.deepEqual(deriveChampion(matches), {
+    champion: null, // real score is a draw — unchanged current behavior, live score ignored
+    finalists: ["Argentina", "France"],
+    championIsFinal: true,
+  });
+});
+
+test("deriveChampion's provisional champion tracks the live score as the leader changes mid-match", () => {
+  const base = { phase: "final", team_a: "Argentina", team_b: "France", real_score_a: null, real_score_b: null };
+
+  const franceLeading = { ...base, live_score_a: 0, live_score_b: 1 };
+  assert.equal(deriveChampion([franceLeading]).champion, "France");
+
+  const argentinaEqualizesAndLeads = { ...base, live_score_a: 2, live_score_b: 1 };
+  assert.equal(deriveChampion([argentinaEqualizesAndLeads]).champion, "Argentina");
 });
 
 test("deriveSemifinalists collects every team from sf-phase matches, deduplicated", () => {
