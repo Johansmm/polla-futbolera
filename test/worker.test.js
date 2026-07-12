@@ -12,10 +12,12 @@ let totalGoals;
 let mapScorers;
 let fetchFromCacheOrUpstream;
 let handleRequest;
+let MATCH_CACHE_TTL_SECONDS;
 
 test.before(async () => {
   ({ resolveRoute, buildUpstreamUrl, withCors, totalGoals, mapScorers, fetchFromCacheOrUpstream, handleRequest } =
     await import("../worker/src/index.mjs"));
+  ({ MATCH_CACHE_TTL_SECONDS } = await import("../js/football-data-config.mjs"));
 });
 
 // A minimal in-memory stand-in for the MATCH_CACHE KV binding, so these
@@ -55,7 +57,7 @@ function matchWithGoals(home, away) {
 }
 
 test("resolveRoute recognizes the exposed route and rejects anything else", () => {
-  assert.deepEqual(resolveRoute("/matches"), { upstreamPath: "matches", ttlSeconds: 15 });
+  assert.deepEqual(resolveRoute("/matches"), { upstreamPath: "matches", ttlSeconds: MATCH_CACHE_TTL_SECONDS });
   assert.equal(resolveRoute("/scorers"), undefined);
   assert.equal(resolveRoute("/"), undefined);
 });

@@ -5,3 +5,6 @@
 // changes.
 export const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
 export const COMPETITION_CODE = "WC"; // FIFA World Cup
+
+// Workers KV's expirationTtl has a 60s floor (see worker/src/index.mjs).
+export const MATCH_CACHE_TTL_SECONDS = 60;

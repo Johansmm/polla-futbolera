@@ -6,20 +6,24 @@
 // Bindings expected (see wrangler.toml):
 //   MATCH_CACHE — KV namespace used as the cache (`wrangler kv namespace create`)
 //   API_KEY     — secret, football-data.org API token (`wrangler secret put API_KEY`)
-import { FOOTBALL_DATA_BASE_URL, COMPETITION_CODE } from "../../js/football-data-config.mjs";
+import {
+  FOOTBALL_DATA_BASE_URL,
+  COMPETITION_CODE,
+  MATCH_CACHE_TTL_SECONDS,
+} from "../../js/football-data-config.mjs";
 
 // One primary upstream endpoint per route exposed to the client, plus this
 // cache's TTL. A single fixed TTL per route (rather than branching per-match
 // on live/finished/upcoming) keeps the cache key trivial — one entry per
 // route, shared by every client — while still cutting real API calls to
-// roughly 4/minute for the matches endpoint itself, well under the free
+// roughly 1/minute for the matches endpoint itself, well under the free
 // tier's 10/min limit no matter how many clients have the page open at once.
 // "/matches" also folds in the upstream /scorers endpoint (see
 // fetchFromCacheOrUpstream/resolveScorers below) into the same single cached
 // payload — that second upstream call only happens when a goal actually
 // happened somewhere, so it barely adds to the call budget above.
 export const ROUTES = {
-  "/matches": { upstreamPath: "matches", ttlSeconds: 15 },
+  "/matches": { upstreamPath: "matches", ttlSeconds: MATCH_CACHE_TTL_SECONDS },
 };
 
 const CORS_HEADERS = {
