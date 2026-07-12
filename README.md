@@ -349,6 +349,17 @@ API_KEY=your-football-data.org-token
   on the next request, and every client picks it up automatically. Matches
   also lock purely by `kickoff_at` (enforced in `firestore.rules`) — there's
   no admin override to force a match locked early.
+- **Move tokens off the `users` docs** (one-off, for a database seeded before
+  `user_links` existed): `cd admin && node migrate-tokens.js` prints what it
+  would do; `node migrate-tokens.js --apply` does it. Every existing link keeps
+  working — the token value doesn't change, it just stops being readable by
+  other players. Safe to re-run. `admin/seed.js` performs the same migration,
+  but this script touches nothing else (no fixture or squad refetch), so it's
+  the one to reach for. Add `--rotate` to *also* issue everyone a brand-new
+  token and print their new links — do that if the old ones may already have
+  been harvested, since moving a leaked token somewhere safe doesn't stop it
+  from working. Devices stay bound, so nobody has to re-bind; they just need
+  the new URL.
 - **Re-read someone's link** (they lost it, no rotation needed): read
   `user_links/{user_id}.token` in the Console. That collection is admin-only —
   no client can read it, which is exactly why the token can live there.
