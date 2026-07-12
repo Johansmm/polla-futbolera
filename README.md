@@ -130,9 +130,9 @@ independent binding docs — no coordination needed. See `firestore.rules` and
      prints the deployed Worker's URL — paste it into
      `js/worker-config.js`'s `WORKER_URL`.
    - This one-time manual run is only needed for the very first deploy.
-     After that, `.github/workflows/ci.yml`'s `deploy-worker` job redeploys
-     the Worker automatically on every push to `main` (once tests pass) —
-     no more remembering to run `npm run deploy` by hand after merging a PR
+     After that, `.github/workflows/deploy.yml`'s `deploy-worker` job
+     redeploys the Worker automatically on every push to `main` — no more
+     remembering to run `npm run deploy` by hand after merging a PR
      that touches `worker/`. Needs a repo Secret: Settings → Secrets and
      variables → Actions → New repository secret → `CLOUDFLARE_API_TOKEN`,
      a token from [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
@@ -165,9 +165,9 @@ independent binding docs — no coordination needed. See `firestore.rules` and
      `npm install -g firebase-tools`, then `firebase login`.
    - `firebase deploy --only firestore:rules`
    - This one-time manual run is only needed for the very first deploy.
-     After that, `.github/workflows/ci.yml`'s `deploy-rules` job redeploys
-     `firestore.rules` automatically on every push to `main` (once tests
-     pass) — no more remembering to run this by hand after merging a PR
+     After that, `.github/workflows/deploy.yml`'s `deploy-rules` job
+     redeploys `firestore.rules` automatically on every push to `main` — no
+     more remembering to run this by hand after merging a PR
      that touches the rules. This (and `automation/missing-predictions.js`'s
      workflow) needs a repo Secret: Settings → Secrets and variables →
      Actions → New repository secret → `FIREBASE_SERVICE_ACCOUNT_JSON`,
@@ -248,12 +248,18 @@ currently:
 GitHub Actions runs the same tests (plus a `node --check` syntax pass over
 every `.js`/`.mjs` file in the repo) on every pull request and push to
 `main` — see `.github/workflows/ci.yml`. The Actions runner already has
-Java preinstalled, so no extra setup is needed there. On push to `main`
-specifically, two more jobs run after tests pass: `deploy-rules` redeploys
-`firestore.rules` (see "Deploy the security rules" above), and
-`deploy-worker` redeploys the Cloudflare Worker (see "Set up the Cloudflare
-Worker" above) — neither needs a manual `firebase deploy`/`npm run deploy`
-after merging a PR that touches them.
+Java preinstalled, so no extra setup is needed there.
+
+A separate workflow, `.github/workflows/deploy.yml`, runs only on push to
+`main` (deliberately no `pull_request` trigger, so it never shows up as an
+extra check on a PR): `deploy-rules` redeploys `firestore.rules` (see
+"Deploy the security rules" above), and `deploy-worker` redeploys the
+Cloudflare Worker (see "Set up the Cloudflare Worker" above) — neither
+needs a manual `firebase deploy`/`npm run deploy` after merging a PR that
+touches them. Being a separate, push-only workflow means these jobs don't
+re-verify that `ci.yml`'s tests passed on this exact push — that's instead
+expected to already be true by the time anything reaches `main`, via a
+branch protection rule requiring the `test` check before a PR can merge.
 
 ## Cloudflare Worker match proxy
 
