@@ -13,6 +13,7 @@ import {
   calculateTopScorerPoints,
   deriveChampion,
   deriveSemifinalists,
+  deriveTopScorers,
   isMatchLive,
   effectiveScore,
   finishedMatches,
@@ -50,6 +51,23 @@ export function hasMatchNeedingRefresh(matches) {
   return matches.some((match) => isMatchLocked(match) && match.real_score_a == null);
 }
 
+// Shared by every breakdown section (match-by-match and special picks
+// alike): highest points *within this section* — not the overall
+// standings — win the crown (ties share it, same as .leader-row in the
+// general table), and rows are ranked highest-points-first instead of
+// staying in whatever order the overall standings put them in.
+function rankEntries(rawEntries) {
+  const maxPoints = rawEntries.reduce((max, e) => (e.points != null && e.points > max ? e.points : max), -Infinity);
+  return rawEntries
+    .map((e) => ({ ...e, top: e.points != null && e.points === maxPoints }))
+    .sort((a, b) => {
+      if (a.points == null && b.points == null) return a.name.localeCompare(b.name);
+      if (a.points == null) return 1;
+      if (b.points == null) return -1;
+      return b.points - a.points || a.name.localeCompare(b.name);
+    });
+}
+
 // Scorable matches the poll loop hasn't fetched predictions for yet —
 // i.e. matches that crossed into "locked" (kickoff passed) since
 // alreadyFetchedIds was last updated. Each of these needs exactly one
@@ -68,6 +86,7 @@ export function computeStandingsFromData({
   predictionsByMatch,
   specialPicks,
   specialRevealed,
+  scorers,
 }) {
   const scorableMatches = selectScorableMatches(matches, scoringConfig);
   const finished = finishedMatches(matches);
@@ -76,7 +95,20 @@ export function computeStandingsFromData({
   const anyMatchLive = matches.some(isMatchLive);
   const { champion, finalists } = deriveChampion(matches);
   const semifinalists = deriveSemifinalists(matches);
-  const topScorer = tournamentResults?.top_scorer ?? null;
+
+  // config/tournament_results.top_scorer, once the admin sets it, is the
+  // definitive, final answer. Until then, deriveTopScorers' live-derived
+  // leaders (possibly tied, possibly none yet) stand in as a provisional
+  // signal — topScorerIsFinal tells callers (standings.js's pendingNote)
+  // which case they're looking at.
+  const { leaders, top3 } = deriveTopScorers(scorers ?? []);
+  const topScorerIsFinal = Boolean(tournamentResults?.top_scorer);
+  const topScorer = topScorerIsFinal ? tournamentResults.top_scorer : leaders.length ? leaders : null;
+  const top3Scorers = topScorerIsFinal ? (tournamentResults.top_3_scorers ?? []) : top3;
+  // Goal count shared by every tied leader — used for the "Top scorer
+  // picks" section's summary line below, same pattern as a match section's
+  // kickoff/score summary-sub.
+  const leaderGoals = leaders.length ? (scorers ?? []).find((s) => s.name === leaders[0])?.goals : null;
 
   // isMatchLive/effectiveScore only depend on the match itself, not on
   // which user's row is being built — computed once per match here rather
@@ -122,7 +154,7 @@ export function computeStandingsFromData({
             pick.top_scorer_pick,
             {
               topScorer,
-              top3Scorers: tournamentResults.top_3_scorers ?? [],
+              top3Scorers,
               pickTeam: pick.top_scorer_pick_team ?? null,
               semifinalists,
             },
@@ -180,17 +212,7 @@ export function computeStandingsFromData({
           : "—";
         return { name: row.name, prediction, points: breakdown?.points ?? null };
       });
-      // Highest points for this specific match, not the overall standings —
-      // ties share the crown, same as .leader-row in the general table.
-      const maxPoints = rawEntries.reduce((max, e) => (e.points != null && e.points > max ? e.points : max), -Infinity);
-      const entries = rawEntries
-        .map((e) => ({ ...e, top: e.points != null && e.points === maxPoints }))
-        .sort((a, b) => {
-          if (a.points == null && b.points == null) return a.name.localeCompare(b.name);
-          if (a.points == null) return 1;
-          if (b.points == null) return -1;
-          return b.points - a.points || a.name.localeCompare(b.name);
-        });
+      const entries = rankEntries(rawEntries);
 
       return {
         title: `
@@ -205,15 +227,18 @@ export function computeStandingsFromData({
     ? [
         {
           title: '<span class="summary-title">Champion picks</span>',
-          entries: rows.map((row) => ({ name: row.name, prediction: row.championPick ?? "—", points: row.championPoints })),
+          entries: rankEntries(
+            rows.map((row) => ({ name: row.name, prediction: row.championPick ?? "—", points: row.championPoints }))
+          ),
         },
         {
-          title: '<span class="summary-title">Top scorer picks</span>',
-          entries: rows.map((row) => ({
-            name: row.name,
-            prediction: row.topScorerPick ?? "—",
-            points: row.topScorerPoints,
-          })),
+          title: `
+            <span class="summary-title">Top scorer picks</span>
+            ${leaders.length ? `<span class="summary-sub">Current leader: ${leaders.join(", ")} (${leaderGoals} goals)</span>` : ""}
+          `,
+          entries: rankEntries(
+            rows.map((row) => ({ name: row.name, prediction: row.topScorerPick ?? "—", points: row.topScorerPoints }))
+          ),
         },
       ]
     : [];
@@ -223,6 +248,7 @@ export function computeStandingsFromData({
     specialRevealed,
     championDecided: Boolean(champion),
     topScorerKnown: Boolean(topScorer),
+    topScorerIsFinal,
     anyMatchLive,
     matchSections,
     specialSections,

@@ -145,7 +145,7 @@ collection.
 | Doc | Field | Notes |
 |---|---|---|
 | `special_predictions` | `locked_after` (timestamp) | See `special_predictions` above |
-| `tournament_results` | `top_scorer` (string), `top_3_scorers` (array\<string\>) | Set by admin once known — nothing else in Firestore tracks individual goals. Champion/finalists/semifinalists are *not* stored here; they're derived on the fly from the `final`/`sf` matches' real scores |
+| `tournament_results` | `top_scorer` (string), `top_3_scorers` (array\<string\>) | Only needs setting if the live signal (see "Scoring rules" below) can't resolve the Golden Boot on its own — i.e. a goals tie at tournament end, where the real award goes by FIFA's tie-break (assists, then fewest minutes played), not raw goal count. If nobody's picks are affected by such a tie, this can be left unset for the whole tournament. Champion/finalists/semifinalists are *not* stored here; they're derived on the fly from the `final`/`sf` matches' real scores |
 
 Read-only to clients, admin-only write, like every other reference
 collection.
@@ -227,13 +227,25 @@ has passed) directly and computes points itself using the pure functions in
 ever needing an admin step to "recalculate" anything, and there's no
 derived data that can go stale relative to the raw predictions. Champion/
 finalists/semifinalists are derived from the `final`/`sf` matches' real
-scores at read time; the tournament top scorer/top-3 aren't tracked
-anywhere else in Firestore, so an admin sets those once in
-`config/tournament_results` when known. While a match is in progress (a
-`live_score_a`/`live_score_b` is set but `real_score_a`/`real_score_b`
-aren't yet), the standings page shows provisional points sourced from the
-live score instead, via `scoring-logic.mjs`'s `isMatchLive`/`effectiveScore`
-— never stored, and superseded the moment the real score is set.
+scores at read time. While a match is in progress (a `live_score_a`/
+`live_score_b` is set but `real_score_a`/`real_score_b` aren't yet), the
+standings page shows provisional points sourced from the live score
+instead, via `scoring-logic.mjs`'s `isMatchLive`/`effectiveScore` — never
+stored, and superseded the moment the real score is set.
+
+Top scorer points work the same way, but the live signal is the *normal*
+case, not a stand-in for a step the admin is expected to take: the Worker's
+`/matches` route also carries football-data.org's live goal-scorer list
+(see "Cloudflare Worker match proxy" in `README.md`), and
+`scoring-logic.mjs`'s `deriveTopScorers` derives the current leader(s) from
+it directly — goals are unambiguous, so this is correct on its own for the
+entire tournament in the common case. `config/tournament_results.top_scorer`
+only needs setting for the one case the live goals-only signal can't
+resolve: a goals tie among players any pick actually cares about at
+tournament end, where the real Golden Boot goes by FIFA's tie-break
+(assists, then fewest minutes played) — data `/scorers` doesn't carry. If
+that never comes up, the field can stay unset all tournament and standings
+still score correctly off the live signal alone.
 
 ## Explicitly rejected approaches (context for why, so we don't re-litigate)
 

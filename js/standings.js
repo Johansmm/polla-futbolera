@@ -83,17 +83,16 @@ function mergeWorkerMatches(firestoreMatches, workerMatches) {
 // often enough (or, for firestoreMatches, is even allowed by firestore.rules
 // to be cheaply re-read) to justify a Firestore round-trip on every tick.
 async function loadStaticData() {
-  const [scoringConfig, users, specialDeadline, tournamentResults, firestoreMatches, workerMatches] =
-    await Promise.all([
-      fetchScoringConfig(),
-      fetchUsers(),
-      fetchSpecialPredictionsDeadline(),
-      fetchTournamentResults(),
-      fetchFirestoreMatches(),
-      fetchWorkerMatches(),
-    ]);
+  const [scoringConfig, users, specialDeadline, tournamentResults, firestoreMatches, workerData] = await Promise.all([
+    fetchScoringConfig(),
+    fetchUsers(),
+    fetchSpecialPredictionsDeadline(),
+    fetchTournamentResults(),
+    fetchFirestoreMatches(),
+    fetchWorkerMatches(),
+  ]);
 
-  const matches = mergeWorkerMatches(firestoreMatches, workerMatches);
+  const matches = mergeWorkerMatches(firestoreMatches, workerData.matches);
   const scorableMatches = selectScorableMatches(matches, scoringConfig);
   const predictionsByMatch = Object.fromEntries(
     await Promise.all(scorableMatches.map(async (match) => [match.id, await fetchPredictionsByMatch(match.id)]))
@@ -115,6 +114,7 @@ async function loadStaticData() {
     specialPicks,
     firestoreMatches,
     matches,
+    scorers: workerData.scorers,
     predictionsByMatch,
     fetchedPredictionIds: new Set(scorableMatches.map((m) => m.id)),
   };
@@ -129,6 +129,7 @@ function computeStandings(state) {
     predictionsByMatch: state.predictionsByMatch,
     specialPicks: state.specialPicks,
     specialRevealed: state.specialRevealed,
+    scorers: state.scorers,
   });
 }
 
@@ -139,12 +140,13 @@ function computeStandings(state) {
 async function refreshState(state) {
   if (!hasMatchNeedingRefresh(state.matches)) return false;
 
-  const workerMatches = await fetchWorkerMatches();
-  // An empty result means the Worker call itself failed (see
+  const workerData = await fetchWorkerMatches();
+  // An empty matches result means the Worker call itself failed (see
   // fetchWorkerMatches' doc comment) — keep the last-known-good merged
-  // matches rather than overwriting real data with a blank skeleton.
-  if (workerMatches.length) {
-    state.matches = mergeWorkerMatches(state.firestoreMatches, workerMatches);
+  // matches/scorers rather than overwriting real data with a blank skeleton.
+  if (workerData.matches.length) {
+    state.matches = mergeWorkerMatches(state.firestoreMatches, workerData.matches);
+    state.scorers = workerData.scorers;
   }
 
   const newlyLocked = selectNewlyScorableMatches(state.matches, state.scoringConfig, state.fetchedPredictionIds);
@@ -161,7 +163,7 @@ async function refreshState(state) {
   return true;
 }
 
-function pendingNote({ specialRevealed, championDecided, topScorerKnown, anyMatchLive }) {
+function pendingNote({ specialRevealed, championDecided, topScorerKnown, topScorerIsFinal, anyMatchLive }) {
   const notes = [];
   if (anyMatchLive) notes.push("Provisional standings — a match is in progress.");
   if (!specialRevealed) {
@@ -169,8 +171,15 @@ function pendingNote({ specialRevealed, championDecided, topScorerKnown, anyMatc
   } else {
     const missing = [];
     if (!championDecided) missing.push("the champion hasn't been decided yet");
+    // Once a goal has been scored anywhere, topScorerKnown flips true and
+    // top scorer points come from the Worker's live /scorers list instead —
+    // "hasn't been set yet" no longer applies, but those points remain
+    // provisional (see the note below) until the admin confirms the result.
     if (!topScorerKnown) missing.push("the tournament top scorer hasn't been set yet");
     if (missing.length) notes.push(`Match points only for now — ${missing.join(" and ")}.`);
+    if (topScorerKnown && !topScorerIsFinal) {
+      notes.push("Top scorer points are provisional — the tournament's official top scorer hasn't been confirmed yet.");
+    }
   }
   return notes.length ? notes.join(" ") : null;
 }

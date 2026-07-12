@@ -6,16 +6,24 @@
 // Bindings expected (see wrangler.toml):
 //   MATCH_CACHE — KV namespace used as the cache (`wrangler kv namespace create`)
 //   API_KEY     — secret, football-data.org API token (`wrangler secret put API_KEY`)
-import { FOOTBALL_DATA_BASE_URL, COMPETITION_CODE } from "../../js/football-data-config.mjs";
+import {
+  FOOTBALL_DATA_BASE_URL,
+  COMPETITION_CODE,
+  MATCH_CACHE_TTL_SECONDS,
+} from "../../js/football-data-config.mjs";
 
-// One upstream endpoint per route exposed to the client, plus this cache's
-// TTL. A single fixed TTL per route (rather than branching per-match on
-// live/finished/upcoming) keeps the cache key trivial — one entry per route,
-// shared by every client — while still cutting real API calls to roughly
-// 4/minute, well under the free tier's 10/min limit no matter how many
-// clients have the page open at once.
+// One primary upstream endpoint per route exposed to the client, plus this
+// cache's TTL. A single fixed TTL per route (rather than branching per-match
+// on live/finished/upcoming) keeps the cache key trivial — one entry per
+// route, shared by every client — while still cutting real API calls to
+// roughly 1/minute for the matches endpoint itself, well under the free
+// tier's 10/min limit no matter how many clients have the page open at once.
+// "/matches" also folds in the upstream /scorers endpoint (see
+// fetchFromCacheOrUpstream/resolveScorers below) into the same single cached
+// payload — that second upstream call only happens when a goal actually
+// happened somewhere, so it barely adds to the call budget above.
 export const ROUTES = {
-  "/matches": { upstreamPath: "matches", ttlSeconds: 15 },
+  "/matches": { upstreamPath: "matches", ttlSeconds: MATCH_CACHE_TTL_SECONDS },
 };
 
 const CORS_HEADERS = {
@@ -57,6 +65,63 @@ async function staleOrErrorResponse(cache, staleCacheKey, buildErrorResponse) {
   });
 }
 
+// Sums goals across every match with a recorded score (scheduled fixtures
+// contribute nothing) — used to detect whether a goal happened anywhere
+// since the last cached snapshot, the signal that decides whether /scorers
+// is worth a real upstream call.
+export function totalGoals(matches) {
+  return matches.reduce((sum, m) => {
+    const fullTime = m.score?.fullTime;
+    if (fullTime?.home == null || fullTime?.away == null) return sum;
+    return sum + fullTime.home + fullTime.away;
+  }, 0);
+}
+
+// football-data.org's /scorers shape -> this project's flat {name, team, goals}.
+export function mapScorers(apiScorers) {
+  return (apiScorers ?? []).map((s) => ({
+    name: s.player?.name ?? null,
+    team: s.team?.name ?? null,
+    goals: s.goals,
+  }));
+}
+
+// Network failure and a non-ok upstream status both throw here (unlike a
+// bare fetch(), which only throws on the former) so both are handled by one
+// catch at each call site — a non-ok response's status/body ride along on
+// the error so the matches call site can still pass them through unchanged.
+async function fetchUpstreamOrThrow(upstreamPath, apiKey, fetchUpstream) {
+  const res = await fetchUpstream(buildUpstreamUrl(upstreamPath), {
+    headers: { "X-Auth-Token": apiKey },
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    const err = new Error(`Upstream ${upstreamPath} request failed: ${res.status}`);
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+  return body;
+}
+
+// Only refetches /scorers from upstream when goals moved since the previous
+// snapshot (or there is no previous snapshot yet, i.e. first population) —
+// reuses the previous snapshot's scorers otherwise. A failure fetching
+// scorers specifically falls back to the previous snapshot's scorers (or
+// none) rather than failing the whole /matches response — scorers is
+// supplementary, unlike the matches data itself.
+async function resolveScorers({ newTotalGoals, previousTotalGoals, previousScorers, apiKey, fetchUpstream }) {
+  if (previousTotalGoals != null && previousTotalGoals === newTotalGoals) {
+    return previousScorers;
+  }
+  try {
+    const body = await fetchUpstreamOrThrow("scorers", apiKey, fetchUpstream);
+    return mapScorers(JSON.parse(body).scorers);
+  } catch {
+    return previousScorers;
+  }
+}
+
 // cache/fetchUpstream are injected (rather than reaching for env.MATCH_CACHE
 // and global fetch directly) so this can be unit-tested with fakes, no real
 // KV namespace or network access needed.
@@ -68,16 +133,19 @@ export async function fetchFromCacheOrUpstream(route, apiKey, cache, fetchUpstre
     return new Response(cached, { headers: { "Content-Type": "application/json" } });
   }
 
-  let upstreamRes;
+  let matchesBody;
   try {
-    upstreamRes = await fetchUpstream(buildUpstreamUrl(route.upstreamPath), {
-      headers: { "X-Auth-Token": apiKey },
-    });
+    matchesBody = await fetchUpstreamOrThrow(route.upstreamPath, apiKey, fetchUpstream);
   } catch (err) {
-    // A network-level failure (DNS, timeout, connection reset) throws rather
-    // than resolving to a Response, unlike a football-data.org error status —
-    // caught here so callers still get a normal Response with CORS headers,
-    // not an unhandled-exception 500 from the Workers runtime itself.
+    // A network-level failure (DNS, timeout, connection reset) has no
+    // err.status, unlike a football-data.org error status — both end up
+    // as a normal Response with CORS headers, not an unhandled-exception
+    // 500 from the Workers runtime itself.
+    if (err.status != null) {
+      return staleOrErrorResponse(cache, staleCacheKey, () =>
+        new Response(err.body, { status: err.status, headers: { "Content-Type": "application/json" } })
+      );
+    }
     return staleOrErrorResponse(cache, staleCacheKey, () =>
       new Response(JSON.stringify({ error: `Upstream request failed: ${err.message}` }), {
         status: 502,
@@ -85,14 +153,24 @@ export async function fetchFromCacheOrUpstream(route, apiKey, cache, fetchUpstre
       })
     );
   }
-  const body = await upstreamRes.text();
 
-  if (!upstreamRes.ok) {
-    return staleOrErrorResponse(cache, staleCacheKey, () =>
-      new Response(body, { status: upstreamRes.status, headers: { "Content-Type": "application/json" } })
-    );
-  }
+  const matches = JSON.parse(matchesBody).matches ?? [];
+  const newTotalGoals = totalGoals(matches);
 
+  // The non-expiring stale entry doubles as "the previous snapshot" here —
+  // it always holds the last successful combined payload, whether or not
+  // the short-TTL cache entry above it has expired.
+  const staleRaw = await cache.get(staleCacheKey);
+  const previousSnapshot = staleRaw ? JSON.parse(staleRaw) : null;
+  const scorers = await resolveScorers({
+    newTotalGoals,
+    previousTotalGoals: previousSnapshot ? totalGoals(previousSnapshot.matches) : null,
+    previousScorers: previousSnapshot?.scorers ?? [],
+    apiKey,
+    fetchUpstream,
+  });
+
+  const body = JSON.stringify({ matches, scorers });
   await cache.put(cacheKey, body, { expirationTtl: route.ttlSeconds });
   await cache.put(staleCacheKey, body);
   return new Response(body, { headers: { "Content-Type": "application/json" } });

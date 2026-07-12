@@ -19,8 +19,8 @@ sequenceDiagram
     Note over Client,API: Every page load
     Client->>Firestore: read matches (skeleton) + predictions
     Client->>Worker: GET /matches
-    Worker->>API: fetch (skipped if cached, TTL 15s)
-    Worker-->>Client: teams, crests, live/final scores
+    Worker->>API: fetch (skipped if cached)
+    Worker-->>Client: teams, crests, live/final scores, live scorer list
     Note over Client: merge + compute points client-side — nothing server-side
 
     Note over Client,Firestore: When a user saves a prediction
@@ -129,6 +129,18 @@ independent binding docs — no coordination needed. See `firestore.rules` and
    - `npm run deploy` from `worker/` (wraps `wrangler deploy`). Wrangler
      prints the deployed Worker's URL — paste it into
      `js/worker-config.js`'s `WORKER_URL`.
+   - This one-time manual run is only needed for the very first deploy.
+     After that, `.github/workflows/deploy.yml`'s `deploy-worker` job
+     redeploys the Worker automatically on every push to `main` — no more
+     remembering to run `npm run deploy` by hand after merging a PR
+     that touches `worker/`. Needs a repo Secret: Settings → Secrets and
+     variables → Actions → New repository secret → `CLOUDFLARE_API_TOKEN`,
+     a token from [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+     → Create Token → the **Edit Cloudflare Workers** template (scoped to
+     the account this Worker lives in). The `API_KEY` secret pushed above
+     via `wrangler secret put` isn't touched by a redeploy — it's separate,
+     KV-namespace-backed Worker state, not part of what `wrangler deploy`
+     uploads.
 
 3. **Seed the fixture and users**
    - Edit `admin/seed.js`: fill in `USERS` (your group's clients) — matches
@@ -153,9 +165,9 @@ independent binding docs — no coordination needed. See `firestore.rules` and
      `npm install -g firebase-tools`, then `firebase login`.
    - `firebase deploy --only firestore:rules`
    - This one-time manual run is only needed for the very first deploy.
-     After that, `.github/workflows/ci.yml`'s `deploy-rules` job redeploys
-     `firestore.rules` automatically on every push to `main` (once tests
-     pass) — no more remembering to run this by hand after merging a PR
+     After that, `.github/workflows/deploy.yml`'s `deploy-rules` job
+     redeploys `firestore.rules` automatically on every push to `main` — no
+     more remembering to run this by hand after merging a PR
      that touches the rules. This (and `automation/missing-predictions.js`'s
      workflow) needs a repo Secret: Settings → Secrets and variables →
      Actions → New repository secret → `FIREBASE_SERVICE_ACCOUNT_JSON`,
@@ -236,10 +248,18 @@ currently:
 GitHub Actions runs the same tests (plus a `node --check` syntax pass over
 every `.js`/`.mjs` file in the repo) on every pull request and push to
 `main` — see `.github/workflows/ci.yml`. The Actions runner already has
-Java preinstalled, so no extra setup is needed there. On push to `main`
-specifically, a second job (`deploy-rules`) runs after tests pass and
-redeploys `firestore.rules` automatically — see "Deploy the security rules"
-above.
+Java preinstalled, so no extra setup is needed there.
+
+A separate workflow, `.github/workflows/deploy.yml`, runs only on push to
+`main` (deliberately no `pull_request` trigger, so it never shows up as an
+extra check on a PR): `deploy-rules` redeploys `firestore.rules` (see
+"Deploy the security rules" above), and `deploy-worker` redeploys the
+Cloudflare Worker (see "Set up the Cloudflare Worker" above) — neither
+needs a manual `firebase deploy`/`npm run deploy` after merging a PR that
+touches them. Being a separate, push-only workflow means these jobs don't
+re-verify that `ci.yml`'s tests passed on this exact push — that's instead
+expected to already be true by the time anything reaches `main`, via a
+branch protection rule requiring the `test` check before a PR can merge.
 
 ## Cloudflare Worker match proxy
 
@@ -255,17 +275,27 @@ The Worker exposes one read-only route, backed by a Workers KV cache shared
 across every concurrent client so the group loading the app at once doesn't
 multiply real football-data.org calls:
 
-- `GET /matches` → every World Cup match in one response — scheduled
-  fixtures, in-progress scores, and finished results alike, exactly as
-  football-data.org returns them — cached 15s, close to `standings.html`'s
-  own 10s poll interval so a live score reaches clients about as fresh as
-  they ask for it, without approaching the free tier's 10 calls/min limit
-  (15s cache ≈ 4 calls/min)
+- `GET /matches` → every World Cup match — scheduled fixtures, in-progress
+  scores, and finished results alike — plus the tournament's live
+  goal-scorer list, in one combined response: `{ matches: [...], scorers:
+  [...] }`. Cached `MATCH_CACHE_TTL_SECONDS` (`js/football-data-config.mjs`),
+  well under the free tier's 10 calls/min limit. The scorers half only costs
+  a real upstream call when the total goals across every match changed
+  since the last cached snapshot (i.e. a goal was actually scored
+  somewhere) — otherwise the previous snapshot's scorers are reused,
+  keeping the added call volume close to zero the rest of the time
+
+`js/scoring-logic.mjs`'s `deriveTopScorers` turns that `scorers` list into
+the current tournament top scorer (or several, tied) for the standings
+page's "Special" points column — the normal, sufficient source all
+tournament, not a placeholder for an admin step. `config/tournament_results.
+top_scorer` only overrides it for a goals tie the live signal can't resolve
+on its own (see "Scoring rules" in `CLAUDE.md`).
 
 Alongside that short-lived cache entry, the Worker keeps a second,
 non-expiring KV entry holding the last successful upstream response. If a
 real call to football-data.org fails (thrown network error or a non-ok
-status) after the 15s cache has expired, the Worker serves that stale entry
+status) after the short-lived cache has expired, the Worker serves that stale entry
 instead of a bare error, so a temporary upstream outage doesn't blank out
 match data for the group — the response carries an `X-Cache-Status: stale`
 header so a future client-side change could surface "data might be

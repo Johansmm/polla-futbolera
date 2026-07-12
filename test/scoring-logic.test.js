@@ -11,6 +11,7 @@ let calculateTopScorerPoints;
 let finishedMatches;
 let deriveChampion;
 let deriveSemifinalists;
+let deriveTopScorers;
 let isMatchLive;
 let effectiveScore;
 
@@ -23,6 +24,7 @@ test.before(async () => {
     finishedMatches,
     deriveChampion,
     deriveSemifinalists,
+    deriveTopScorers,
     isMatchLive,
     effectiveScore,
   } = await import("../js/scoring-logic.mjs"));
@@ -203,6 +205,57 @@ test("calculateTopScorerPoints never awards the team bonus outside the top 3", (
     TOP_SCORER_CONFIG
   );
   assert.equal(points, 0);
+});
+
+test("calculateTopScorerPoints accepts an array of tied live-derived leaders, awarding exact for either one", () => {
+  const context = {
+    topScorer: ["Messi", "Mbappe"], // live-derived, tied for the lead
+    top3Scorers: ["Messi", "Mbappe", "Julian Alvarez"],
+    pickTeam: "France",
+    semifinalists: ["Argentina", "France", "Croatia", "Morocco"],
+  };
+  assert.equal(calculateTopScorerPoints("Mbappe", context, TOP_SCORER_CONFIG), 10 + 3);
+  assert.equal(calculateTopScorerPoints("Messi", { ...context, pickTeam: "Argentina" }, TOP_SCORER_CONFIG), 10 + 3);
+});
+
+test("deriveTopScorers returns no leaders/top3 with no scorers yet", () => {
+  assert.deepEqual(deriveTopScorers([]), { leaders: [], top3: [] });
+});
+
+test("deriveTopScorers ties multiple players for the lead when their goal counts match", () => {
+  const scorers = [
+    { name: "Mbappe", team: "France", goals: 8 },
+    { name: "Messi", team: "Argentina", goals: 8 },
+    { name: "Julian Alvarez", team: "Argentina", goals: 6 },
+  ];
+  const { leaders, top3 } = deriveTopScorers(scorers);
+  assert.deepEqual(new Set(leaders), new Set(["Mbappe", "Messi"]));
+  assert.deepEqual(new Set(top3), new Set(["Mbappe", "Messi", "Julian Alvarez"]));
+});
+
+// Real-data shape from the issue: 8/8/7/6 goals across 4 players — only
+// 8/7/6 are distinct values, so the 3rd-highest distinct value (6) admits
+// all 4 players into top3 instead of arbitrarily cutting one at a tie.
+test("deriveTopScorers expands top3 past 3 players when a tie straddles the 3rd-distinct-value boundary", () => {
+  const scorers = [
+    { name: "A", team: "T1", goals: 8 },
+    { name: "B", team: "T2", goals: 8 },
+    { name: "C", team: "T3", goals: 7 },
+    { name: "D", team: "T4", goals: 6 },
+    { name: "E", team: "T5", goals: 5 },
+  ];
+  const { leaders, top3 } = deriveTopScorers(scorers);
+  assert.deepEqual(new Set(leaders), new Set(["A", "B"]));
+  assert.deepEqual(new Set(top3), new Set(["A", "B", "C", "D"]));
+});
+
+test("deriveTopScorers' top3 includes everyone when fewer than 3 distinct goal counts exist", () => {
+  const scorers = [
+    { name: "A", team: "T1", goals: 3 },
+    { name: "B", team: "T2", goals: 2 },
+  ];
+  const { top3 } = deriveTopScorers(scorers);
+  assert.deepEqual(new Set(top3), new Set(["A", "B"]));
 });
 
 test("finishedMatches keeps only matches with both real scores set", () => {

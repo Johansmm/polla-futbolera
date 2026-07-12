@@ -43,23 +43,30 @@ export async function fetchFirestoreMatches() {
 // Exported on its own (not just via fetchMatches below) so standings.js's
 // poll loop can refetch just this — the Worker's cached route — on every
 // tick without touching Firestore at all.
-// Failures here (network, Worker down) resolve to an empty list rather than
+// Failures here (network, Worker down) resolve to empty lists rather than
 // throwing — team names/scores just stay blank, same as a match whose
 // source_match_id hasn't resolved yet. Predictions/standings don't depend on
 // the Worker at all, so a hiccup here shouldn't block the rest of the page.
+// scorers (the Worker's combined /matches payload also carries the
+// tournament's live goal-scorer list, see worker/src/index.mjs) only
+// matters to standings.js — js/predict.js's fetchMatches() below just
+// discards it.
 export async function fetchWorkerMatches() {
   try {
     const res = await fetch(`${WORKER_URL}/matches`);
-    if (!res.ok) return [];
+    if (!res.ok) return { matches: [], scorers: [] };
     const data = await res.json();
-    return data.matches ?? [];
+    return { matches: data.matches ?? [], scorers: data.scorers ?? [] };
   } catch {
-    return [];
+    return { matches: [], scorers: [] };
   }
 }
 
 export async function fetchMatches() {
-  const [firestoreMatches, workerMatches] = await Promise.all([fetchFirestoreMatches(), fetchWorkerMatches()]);
+  const [firestoreMatches, { matches: workerMatches }] = await Promise.all([
+    fetchFirestoreMatches(),
+    fetchWorkerMatches(),
+  ]);
   // Built once and reused for every Firestore match, rather than making
   // mergeMatchData scan the whole Worker response again each time.
   const workerMatchesById = new Map(workerMatches.map((m) => [m.id, m]));
