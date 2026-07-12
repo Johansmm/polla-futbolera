@@ -72,13 +72,20 @@ export function calculateChampionPoints(championPick, { champion, finalists }, c
 // special_predictions save time and stored on the pick as
 // top_scorer_pick_team (js/special.js) — or null if unset (a pick made
 // before that field existed).
+//
+// topScorer is either a string (the admin-set config/tournament_results.top_scorer,
+// definitive) or an array (deriveTopScorers()'s live-derived leaders,
+// provisional — possibly more than one name tied for the lead) — normalized
+// to an array here so both cases share one inclusion check.
 export function calculateTopScorerPoints(
   topScorerPick,
   { topScorer, top3Scorers, pickTeam, semifinalists },
   topScorerConfig
 ) {
+  const topScorerNames = Array.isArray(topScorer) ? topScorer : [topScorer];
+
   let points = 0;
-  if (topScorerPick === topScorer) {
+  if (topScorerNames.includes(topScorerPick)) {
     points = topScorerConfig.exact;
   } else if (top3Scorers.includes(topScorerPick)) {
     points = topScorerConfig.top_3;
@@ -89,6 +96,27 @@ export function calculateTopScorerPoints(
   }
 
   return points;
+}
+
+// Derives the tournament's current top scorer(s) from the Worker's live
+// /scorers list — the provisional counterpart to config/tournament_results'
+// admin-set, definitive top_scorer/top_3_scorers, used until that's set.
+// leaders is everyone tied for the single highest goal count; top3 is
+// everyone at or above the 3rd-highest *distinct* goal value, so a tie
+// straddling that boundary expands the group instead of cutting it off
+// arbitrarily (e.g. goal counts of 8/8/7/6 make top3 four players, not
+// three, since only 8/7/6 are distinct values).
+export function deriveTopScorers(scorers) {
+  if (!scorers.length) return { leaders: [], top3: [] };
+
+  const distinctGoals = [...new Set(scorers.map((s) => s.goals))].sort((a, b) => b - a);
+  const maxGoals = distinctGoals[0];
+  const top3Threshold = distinctGoals[Math.min(2, distinctGoals.length - 1)];
+
+  return {
+    leaders: scorers.filter((s) => s.goals === maxGoals).map((s) => s.name),
+    top3: scorers.filter((s) => s.goals >= top3Threshold).map((s) => s.name),
+  };
 }
 
 // A match is "live" once js/worker-matches.mjs has merged in a running
