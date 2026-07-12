@@ -13,6 +13,7 @@ import {
   calculateTopScorerPoints,
   deriveChampion,
   deriveSemifinalists,
+  deriveTopScorers,
   isMatchLive,
   effectiveScore,
   finishedMatches,
@@ -68,6 +69,7 @@ export function computeStandingsFromData({
   predictionsByMatch,
   specialPicks,
   specialRevealed,
+  scorers,
 }) {
   const scorableMatches = selectScorableMatches(matches, scoringConfig);
   const finished = finishedMatches(matches);
@@ -76,7 +78,20 @@ export function computeStandingsFromData({
   const anyMatchLive = matches.some(isMatchLive);
   const { champion, finalists } = deriveChampion(matches);
   const semifinalists = deriveSemifinalists(matches);
-  const topScorer = tournamentResults?.top_scorer ?? null;
+
+  // config/tournament_results.top_scorer, once the admin sets it, is the
+  // definitive, final answer. Until then, deriveTopScorers' live-derived
+  // leaders (possibly tied, possibly none yet) stand in as a provisional
+  // signal — topScorerIsFinal tells callers (standings.js's pendingNote)
+  // which case they're looking at.
+  const { leaders, top3 } = deriveTopScorers(scorers ?? []);
+  const topScorerIsFinal = Boolean(tournamentResults?.top_scorer);
+  const topScorer = topScorerIsFinal ? tournamentResults.top_scorer : leaders.length ? leaders : null;
+  const top3Scorers = topScorerIsFinal ? (tournamentResults.top_3_scorers ?? []) : top3;
+  // Goal count shared by every tied leader — used for the "Top scorer
+  // picks" section's summary line below, same pattern as a match section's
+  // kickoff/score summary-sub.
+  const leaderGoals = leaders.length ? (scorers ?? []).find((s) => s.name === leaders[0])?.goals : null;
 
   // isMatchLive/effectiveScore only depend on the match itself, not on
   // which user's row is being built — computed once per match here rather
@@ -122,7 +137,7 @@ export function computeStandingsFromData({
             pick.top_scorer_pick,
             {
               topScorer,
-              top3Scorers: tournamentResults.top_3_scorers ?? [],
+              top3Scorers,
               pickTeam: pick.top_scorer_pick_team ?? null,
               semifinalists,
             },
@@ -208,7 +223,10 @@ export function computeStandingsFromData({
           entries: rows.map((row) => ({ name: row.name, prediction: row.championPick ?? "—", points: row.championPoints })),
         },
         {
-          title: '<span class="summary-title">Top scorer picks</span>',
+          title: `
+            <span class="summary-title">Top scorer picks</span>
+            ${leaders.length ? `<span class="summary-sub">Current leader: ${leaders.join(", ")} (${leaderGoals} goals)</span>` : ""}
+          `,
           entries: rows.map((row) => ({
             name: row.name,
             prediction: row.topScorerPick ?? "—",
@@ -223,6 +241,7 @@ export function computeStandingsFromData({
     specialRevealed,
     championDecided: Boolean(champion),
     topScorerKnown: Boolean(topScorer),
+    topScorerIsFinal,
     anyMatchLive,
     matchSections,
     specialSections,

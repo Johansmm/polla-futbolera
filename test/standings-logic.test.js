@@ -199,6 +199,88 @@ test("computeStandingsFromData applies the semifinal/final bonus using the pick'
 
   const alice = result.rows[0];
   assert.equal(alice.topScorerPoints, 10 + 3); // exact (10) + team reached the semifinal (3)
+  assert.equal(result.topScorerIsFinal, true);
+});
+
+// Live-derived top scorer points, sourced from the Worker's /scorers list,
+// stand in as a provisional signal until config/tournament_results.top_scorer
+// is set — issue #62.
+test("computeStandingsFromData derives provisional top scorer points from the live scorers list when no admin result is set yet", () => {
+  const { finishedR16 } = buildScenario();
+  const sfMatch = { id: "sf_01", phase: "sf", team_a: "Argentina", team_b: "Croatia" };
+  const users = [{ user_id: "alice", name: "Alice" }, { user_id: "bob", name: "Bob" }];
+
+  const scorers = [
+    { name: "Lionel Messi", team: "Argentina", goals: 8 },
+    { name: "Kylian Mbappe", team: "France", goals: 7 },
+  ];
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches: [finishedR16, sfMatch],
+    tournamentResults: null,
+    predictionsByMatch: { r16_01: {} },
+    specialPicks: {
+      alice: { top_scorer_pick: "Lionel Messi", top_scorer_pick_team: "Argentina" },
+      bob: { top_scorer_pick: "Kylian Mbappe", top_scorer_pick_team: "France" },
+    },
+    specialRevealed: true,
+    scorers,
+  });
+
+  assert.equal(result.topScorerIsFinal, false);
+  assert.equal(result.topScorerKnown, true);
+
+  const alice = result.rows.find((r) => r.userId === "alice");
+  const bob = result.rows.find((r) => r.userId === "bob");
+  assert.equal(alice.topScorerPoints, 10 + 3); // sole live leader (exact) + semifinal bonus
+  // Only two distinct goal counts (8, 7) exist, so top3's threshold falls
+  // back to the lower one — Mbappe (7 goals) lands in top3, not a miss.
+  assert.equal(bob.topScorerPoints, 5); // top_3, no bonus — France isn't in this scenario's semifinalists
+
+  assert.match(result.specialSections[1].title, /Current leader: Lionel Messi \(8 goals\)/);
+});
+
+test("computeStandingsFromData respects the admin-set top scorer once present, ignoring the live scorers list", () => {
+  const { finishedR16 } = buildScenario();
+  const users = [{ user_id: "alice", name: "Alice" }];
+
+  const scorers = [{ name: "Kylian Mbappe", team: "France", goals: 8 }]; // live leader differs from the admin's final pick
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches: [finishedR16],
+    tournamentResults: { top_scorer: "Lionel Messi", top_3_scorers: [] },
+    predictionsByMatch: { r16_01: {} },
+    specialPicks: { alice: { top_scorer_pick: "Lionel Messi" } },
+    specialRevealed: true,
+    scorers,
+  });
+
+  assert.equal(result.topScorerIsFinal, true);
+  assert.equal(result.rows[0].topScorerPoints, 10);
+});
+
+test("computeStandingsFromData reports no known top scorer before a single goal has been scored anywhere", () => {
+  const { finishedR16 } = buildScenario();
+  const users = [{ user_id: "alice", name: "Alice" }];
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches: [finishedR16],
+    tournamentResults: null,
+    predictionsByMatch: { r16_01: {} },
+    specialPicks: { alice: { top_scorer_pick: "Lionel Messi" } },
+    specialRevealed: true,
+    scorers: [],
+  });
+
+  assert.equal(result.topScorerKnown, false);
+  assert.equal(result.topScorerIsFinal, false);
+  assert.equal(result.rows[0].topScorerPoints, 0);
 });
 
 // hasMatchNeedingRefresh backs standings.js's poll loop: a network-free
