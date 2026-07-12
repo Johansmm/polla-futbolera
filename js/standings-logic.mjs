@@ -51,6 +51,23 @@ export function hasMatchNeedingRefresh(matches) {
   return matches.some((match) => isMatchLocked(match) && match.real_score_a == null);
 }
 
+// Shared by every breakdown section (match-by-match and special picks
+// alike): highest points *within this section* — not the overall
+// standings — win the crown (ties share it, same as .leader-row in the
+// general table), and rows are ranked highest-points-first instead of
+// staying in whatever order the overall standings put them in.
+function rankEntries(rawEntries) {
+  const maxPoints = rawEntries.reduce((max, e) => (e.points != null && e.points > max ? e.points : max), -Infinity);
+  return rawEntries
+    .map((e) => ({ ...e, top: e.points != null && e.points === maxPoints }))
+    .sort((a, b) => {
+      if (a.points == null && b.points == null) return a.name.localeCompare(b.name);
+      if (a.points == null) return 1;
+      if (b.points == null) return -1;
+      return b.points - a.points || a.name.localeCompare(b.name);
+    });
+}
+
 // Scorable matches the poll loop hasn't fetched predictions for yet —
 // i.e. matches that crossed into "locked" (kickoff passed) since
 // alreadyFetchedIds was last updated. Each of these needs exactly one
@@ -195,17 +212,7 @@ export function computeStandingsFromData({
           : "—";
         return { name: row.name, prediction, points: breakdown?.points ?? null };
       });
-      // Highest points for this specific match, not the overall standings —
-      // ties share the crown, same as .leader-row in the general table.
-      const maxPoints = rawEntries.reduce((max, e) => (e.points != null && e.points > max ? e.points : max), -Infinity);
-      const entries = rawEntries
-        .map((e) => ({ ...e, top: e.points != null && e.points === maxPoints }))
-        .sort((a, b) => {
-          if (a.points == null && b.points == null) return a.name.localeCompare(b.name);
-          if (a.points == null) return 1;
-          if (b.points == null) return -1;
-          return b.points - a.points || a.name.localeCompare(b.name);
-        });
+      const entries = rankEntries(rawEntries);
 
       return {
         title: `
@@ -220,18 +227,18 @@ export function computeStandingsFromData({
     ? [
         {
           title: '<span class="summary-title">Champion picks</span>',
-          entries: rows.map((row) => ({ name: row.name, prediction: row.championPick ?? "—", points: row.championPoints })),
+          entries: rankEntries(
+            rows.map((row) => ({ name: row.name, prediction: row.championPick ?? "—", points: row.championPoints }))
+          ),
         },
         {
           title: `
             <span class="summary-title">Top scorer picks</span>
             ${leaders.length ? `<span class="summary-sub">Current leader: ${leaders.join(", ")} (${leaderGoals} goals)</span>` : ""}
           `,
-          entries: rows.map((row) => ({
-            name: row.name,
-            prediction: row.topScorerPick ?? "—",
-            points: row.topScorerPoints,
-          })),
+          entries: rankEntries(
+            rows.map((row) => ({ name: row.name, prediction: row.topScorerPick ?? "—", points: row.topScorerPoints }))
+          ),
         },
       ]
     : [];

@@ -159,6 +159,77 @@ test("computeStandingsFromData scores match and champion picks, ranks, and build
   assert.equal(result.specialSections.length, 2);
 });
 
+// Each breakdown section (match-by-match and special picks alike) ranks by
+// its own points, independent of the overall standings order — a user
+// leading the general table can still trail in, say, the champion pick
+// section, and that section must reflect its own leader, not the general
+// table's.
+test("specialSections rank entries by that section's own points, not the overall standings order, and flag the leader", () => {
+  const { finishedR16, final } = buildScenario();
+  const matches = [finishedR16, final];
+
+  const users = [
+    { user_id: "alice", name: "Alice" },
+    { user_id: "bob", name: "Bob" },
+  ];
+
+  // Alice wins the overall table on match points alone; Bob barely scores
+  // any match points but nails the champion and top scorer picks.
+  const predictionsByMatch = {
+    r16_01: {
+      alice: { predicted_score_a: 2, predicted_score_b: 1 }, // exact
+      bob: { predicted_score_a: 0, predicted_score_b: 2 }, // miss
+    },
+    final_01: {
+      alice: { predicted_score_a: 2, predicted_score_b: 0 }, // exact
+      bob: { predicted_score_a: 0, predicted_score_b: 2 }, // miss
+    },
+  };
+
+  const specialPicks = {
+    alice: { champion_pick: "Brazil", top_scorer_pick: "Mbappe" }, // finalist pick, top_3
+    bob: { champion_pick: "Argentina", top_scorer_pick: "Messi" }, // exact champion, exact scorer
+  };
+
+  const scorers = [
+    { name: "Messi", team: "Argentina", goals: 8 },
+    { name: "Mbappe", team: "France", goals: 6 },
+  ];
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches,
+    tournamentResults: null,
+    predictionsByMatch,
+    specialPicks,
+    specialRevealed: true,
+    scorers,
+  });
+
+  const alice = result.rows.find((r) => r.userId === "alice");
+  const bob = result.rows.find((r) => r.userId === "bob");
+  assert.ok(alice.total > bob.total); // Alice leads the overall table...
+  assert.ok(bob.championPoints > alice.championPoints); // ...but Bob wins the champion pick...
+  assert.ok(bob.topScorerPoints > alice.topScorerPoints); // ...and the top scorer pick.
+
+  const [championSection, topScorerSection] = result.specialSections;
+
+  assert.deepEqual(
+    championSection.entries.map((e) => e.name),
+    ["Bob", "Alice"]
+  );
+  assert.equal(championSection.entries[0].top, true);
+  assert.equal(championSection.entries[1].top, false);
+
+  assert.deepEqual(
+    topScorerSection.entries.map((e) => e.name),
+    ["Bob", "Alice"]
+  );
+  assert.equal(topScorerSection.entries[0].top, true);
+  assert.equal(topScorerSection.entries[1].top, false);
+});
+
 test("computeStandingsFromData marks a scorable match with no prediction as a miss, not pending", () => {
   const { finishedR16 } = buildScenario();
   const users = [{ user_id: "alice", name: "Alice" }];
