@@ -3,11 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Polla — World Cup 2026</title>
-  <meta name="description" content="Score-prediction pool for the World Cup 2026 knockout stage." />
-  <meta name="theme-color" content="#eef4ef" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#0b120e" media="(prefers-color-scheme: dark)" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E" />
+  <title>Polla — World Cup 2026 prediction pool</title>
+  <meta name="description" content="A private score-prediction pool for the World Cup 2026 knockout stage." />
+  <meta name="theme-color" content="#dceef0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0d1726" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="assets/polla-mark.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&amp;family=Spline+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
   <script>
     // Runs before first paint so token holders never see this landing page
     // flash by on their way to the prediction form.
@@ -16,21 +19,80 @@
       window.location.replace(`predict.html?token=${encodeURIComponent(token)}`);
     }
   </script>
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/style.css?v=2" />
 </head>
-<body>
-  <main class="container landing">
-    <p class="eyebrow">⚽ Polla · World Cup 2026</p>
-    <h1>The prediction pool</h1>
-    <p>
-      Predict the score of every knockout match, pick your champion and top
-      scorer, and climb the standings.
-    </p>
-    <p class="hint">
-      Everything runs through the personal link the organizer sent you — if
-      yours doesn't work, ask for a fresh one. The link is personal: don't
-      forward it.
-    </p>
-  </main>
+<body class="landing-page">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="landing-shell">
+    <header class="landing-header">
+      <a class="brand-lockup" href="index.html" aria-label="Polla home">
+        <img class="brand-mark" src="assets/polla-mark.svg" alt="" width="48" height="48" />
+        <span class="brand-type">
+          <strong>Polla</strong>
+          <small>World Cup 2026</small>
+        </span>
+      </a>
+      <span class="private-pool-badge"><span aria-hidden="true"></span> Private knockout pool</span>
+    </header>
+
+    <main id="main-content" class="landing-main" tabindex="-1">
+      <section class="landing-hero" aria-labelledby="landing-title">
+        <p class="eyebrow">The knockout stage, called by you</p>
+        <h1 id="landing-title">
+          <span>Call the score.</span>
+          <span class="headline-accent">Own the bracket.</span>
+        </h1>
+        <p class="landing-lede">
+          Predict every knockout score, back your champion and top scorer,
+          then watch every point reshape the table.
+        </p>
+
+        <div class="route-block">
+          <p class="route-label">The road to the trophy</p>
+          <ol class="tournament-route" aria-label="Knockout tournament stages">
+            <li><span class="route-code">R16</span><span class="route-name">Round of 16</span></li>
+            <li><span class="route-code">QF</span><span class="route-name">Quarterfinals</span></li>
+            <li><span class="route-code">SF</span><span class="route-name">Semifinals</span></li>
+            <li><span class="route-code">F</span><span class="route-name">Final</span></li>
+            <li class="is-trophy"><span class="route-code">CUP</span><span class="route-name">Champion</span></li>
+          </ol>
+        </div>
+
+        <ul class="landing-pillars" aria-label="What you can do">
+          <li><strong>Score calls</strong><span>One save per match</span></li>
+          <li><strong>Special picks</strong><span>Champion + top scorer</span></li>
+          <li><strong>Live table</strong><span>Every point, calculated live</span></li>
+        </ul>
+      </section>
+
+      <aside class="entry-pass" aria-labelledby="entry-pass-title">
+        <div class="pass-topline">
+          <span>Player access</span>
+          <span>WC / 26</span>
+        </div>
+        <img class="pass-mark" src="assets/polla-mark.svg" alt="" width="64" height="64" />
+        <p class="pass-kicker">Your tournament credential</p>
+        <h2 id="entry-pass-title">Your link is your ticket.</h2>
+        <p class="pass-copy">
+          There is no public sign-in screen. Open the personal link your
+          organizer sent and you will land directly in your score desk.
+        </p>
+        <ol class="entry-steps">
+          <li><span>01</span><div><strong>Open</strong><p>Use the exact personal link you received.</p></div></li>
+          <li><span>02</span><div><strong>Predict</strong><p>Save scores and special picks before they lock.</p></div></li>
+          <li><span>03</span><div><strong>Follow</strong><p>Return to see results and the live standings.</p></div></li>
+        </ol>
+        <p class="pass-warning">
+          <strong>Keep it personal.</strong> Your link works like a password,
+          so do not forward it. Ask the organizer for a fresh one if needed.
+        </p>
+        <div class="pass-code" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      </aside>
+    </main>
+
+    <footer class="landing-footer">
+      <span>World Cup 2026 · Knockout predictions only · No money handled in the app</span>
+    </footer>
+  </div>
 </body>
 </html>

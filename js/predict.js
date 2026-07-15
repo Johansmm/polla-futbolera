@@ -13,6 +13,22 @@ const PHASE_LABELS = {
   final: "Final",
 };
 
+const PHASE_CODES = {
+  r16: "R16",
+  qf: "QF",
+  sf: "SF",
+  third_place: "3P",
+  final: "F",
+};
+
+const PHASE_NOTES = {
+  r16: "The knockout run begins.",
+  qf: "The field narrows.",
+  sf: "One win from the final.",
+  third_place: "The bronze-medal match.",
+  final: "The trophy match.",
+};
+
 const PHASE_ORDER = ["r16", "qf", "sf", "third_place", "final"];
 
 const statusEl = document.getElementById("status");
@@ -100,8 +116,10 @@ function renderLockedRow(row, match, prediction) {
       <span class="match-kickoff">${formatKickoff(match)}</span>
       ${pill}
     </div>
-    ${teamLine(match.team_a, match.team_a_crest_url, scoreTileHtml(tileA, finished ? "is-final" : ""))}
-    ${teamLine(match.team_b, match.team_b_crest_url, scoreTileHtml(tileB, finished ? "is-final" : ""))}
+    <div class="match-scoreboard">
+      ${teamLine(match.team_a, match.team_a_crest_url, scoreTileHtml(tileA, finished ? "is-final" : ""))}
+      ${teamLine(match.team_b, match.team_b_crest_url, scoreTileHtml(tileB, finished ? "is-final" : ""))}
+    </div>
     ${note ? `<div class="match-note">${note}</div>` : ""}
   `;
 }
@@ -118,12 +136,15 @@ function renderMatchRow(match, prediction, userId) {
   row.innerHTML = `
     <div class="match-head">
       <span class="match-kickoff">${formatKickoff(match)}</span>
+      <span class="match-state is-open">Open</span>
     </div>
-    ${teamLine(match.team_a, match.team_a_crest_url, scoreInputHtml("score-a", match.team_a, prediction?.predicted_score_a))}
-    ${teamLine(match.team_b, match.team_b_crest_url, scoreInputHtml("score-b", match.team_b, prediction?.predicted_score_b))}
+    <div class="match-scoreboard">
+      ${teamLine(match.team_a, match.team_a_crest_url, scoreInputHtml("score-a", match.team_a, prediction?.predicted_score_a))}
+      ${teamLine(match.team_b, match.team_b_crest_url, scoreInputHtml("score-b", match.team_b, prediction?.predicted_score_b))}
+    </div>
     <div class="match-actions">
       <div class="save-feedback" role="status" hidden></div>
-      <button type="button" class="save-btn" aria-label="Save prediction for ${match.team_a ?? "?"} vs ${match.team_b ?? "?"}">Save</button>
+      <button type="button" class="save-btn" aria-label="Save prediction for ${match.team_a ?? "?"} vs ${match.team_b ?? "?"}">Save score</button>
     </div>
   `;
 
@@ -237,7 +258,7 @@ function renderMatchRow(match, prediction, userId) {
       scoreAInput.value = savedA;
       scoreBInput.value = savedB;
       markSaved();
-      showStatus(feedback, "Saved");
+      showStatus(feedback, "Score saved");
       hideFeedbackTimer = setTimeout(() => {
         feedback.hidden = true;
       }, 4000);
@@ -254,7 +275,7 @@ function renderMatchRow(match, prediction, userId) {
         showStatus(feedback, "Couldn't save — check your connection and try again.", true);
       }
     } finally {
-      saveBtn.textContent = "Save";
+      saveBtn.textContent = "Save score";
       saveBtn.disabled = lockedDuringSave;
       if (!lockedDuringSave) {
         scoreAInput.disabled = false;
@@ -266,35 +287,107 @@ function renderMatchRow(match, prediction, userId) {
   return row;
 }
 
+function renderPredictionOverview(matches) {
+  const openMatches = matches.filter((match) => !isMatchLocked(match));
+  const lockedMatches = matches.length - openMatches.length;
+  const nextMatch = openMatches.reduce((next, match) => {
+    if (!next) return match;
+    return new Date(match.kickoff_at?.toDate?.() ?? match.kickoff_at) <
+      new Date(next.kickoff_at?.toDate?.() ?? next.kickoff_at)
+      ? match
+      : next;
+  }, null);
+
+  const overview = document.createElement("section");
+  overview.className = "prediction-overview";
+  overview.setAttribute("aria-label", "Prediction progress");
+
+  const progress = document.createElement("div");
+  progress.className = "prediction-progress";
+  for (const [value, label] of [
+    [openMatches.length, "Open"],
+    [lockedMatches, "Locked"],
+    [matches.length, "Total"],
+  ]) {
+    const item = document.createElement("div");
+    const number = document.createElement("strong");
+    const caption = document.createElement("span");
+    number.textContent = String(value);
+    caption.textContent = label;
+    item.append(number, caption);
+    progress.appendChild(item);
+  }
+
+  const next = document.createElement("div");
+  next.className = "next-deadline";
+  const kicker = document.createElement("span");
+  kicker.textContent = nextMatch ? "Next lock" : "Current status";
+  const title = document.createElement("strong");
+  const detail = document.createElement("small");
+  if (nextMatch) {
+    title.textContent = `${nextMatch.team_a ?? "To be decided"} vs ${nextMatch.team_b ?? "To be decided"}`;
+    detail.textContent = formatKickoff(nextMatch);
+  } else {
+    title.textContent = "Every listed match is locked";
+    detail.textContent = "Review your saved calls by opening each phase.";
+  }
+  next.append(kicker, title, detail);
+  overview.append(progress, next);
+  return overview;
+}
+
 function renderForm(matches, predictions, userId) {
   formEl.innerHTML = "";
   const groups = groupByPhase(matches);
+
+  formEl.appendChild(renderPredictionOverview(matches));
 
   for (const phase of PHASE_ORDER) {
     const phaseMatches = groups[phase];
     if (!phaseMatches?.length) continue;
 
-    const heading = document.createElement("h2");
-    heading.textContent = PHASE_LABELS[phase] ?? phase;
-
     const section = document.createElement("section");
     section.className = "phase-section";
-    section.appendChild(heading);
+    section.dataset.phase = phase;
+
+    const phaseHeader = document.createElement("header");
+    phaseHeader.className = "phase-header";
+    const phaseTitle = document.createElement("div");
+    phaseTitle.className = "phase-title";
+    const code = document.createElement("span");
+    code.className = "phase-code";
+    code.textContent = PHASE_CODES[phase] ?? phase;
+    const titleCopy = document.createElement("div");
+    const heading = document.createElement("h2");
+    heading.textContent = PHASE_LABELS[phase] ?? phase;
+    const note = document.createElement("p");
+    note.textContent = PHASE_NOTES[phase] ?? "Tournament stage";
+    titleCopy.append(heading, note);
+    phaseTitle.append(code, titleCopy);
+
+    const count = document.createElement("span");
+    count.className = "phase-count";
+    count.textContent = `${phaseMatches.length} ${phaseMatches.length === 1 ? "match" : "matches"}`;
+    phaseHeader.append(phaseTitle, count);
+    section.appendChild(phaseHeader);
 
     // A fully locked phase is history — collapse its rows so the first
     // thing on screen is always the next match that can still be
-    // predicted. The <details> wraps only the rows, keeping the phase
-    // heading a real heading for assistive tech.
-    let rowContainer = section;
+    // predicted. The phase header remains outside the disclosure, keeping
+    // its h2 available to heading navigation.
+    let rowContainer = document.createElement("div");
+    rowContainer.className = "match-grid";
     if (phaseMatches.every(isMatchLocked)) {
       const details = document.createElement("details");
       details.className = "locked-rows";
       const summary = document.createElement("summary");
       summary.textContent =
-        phaseMatches.length === 1 ? "1 locked match" : `${phaseMatches.length} locked matches`;
+        phaseMatches.length === 1 ? "Review the locked match" : `Review ${phaseMatches.length} locked matches`;
       details.appendChild(summary);
       section.appendChild(details);
       rowContainer = details;
+    } else {
+      section.appendChild(rowContainer);
     }
 
     for (const match of phaseMatches) {

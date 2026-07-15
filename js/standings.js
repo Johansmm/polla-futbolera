@@ -27,6 +27,7 @@ import {
 
 const statusEl = document.getElementById("status");
 const noteEl = document.getElementById("standings-note");
+const leaderboardEl = document.getElementById("leaderboard-stage");
 const tableEl = document.getElementById("standings-table");
 const sectionsEl = document.getElementById("breakdown-sections");
 const columnsHelpEl = document.getElementById("columns-help");
@@ -255,6 +256,60 @@ function td(className, ...children) {
   return cell;
 }
 
+function renderLeaderboard(rows, totalScorableMatches, viewerId) {
+  leaderboardEl.textContent = "";
+
+  const heading = document.createElement("div");
+  heading.className = "leaderboard-heading";
+  const eyebrow = document.createElement("p");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "Front runners";
+  const title = document.createElement("h2");
+  title.textContent = "The race right now";
+  heading.append(eyebrow, title);
+
+  const cards = document.createElement("div");
+  cards.className = "leaderboard-cards";
+  for (const row of rows.slice(0, 3)) {
+    const card = document.createElement("article");
+    card.className = "leaderboard-card";
+    if (row.rank === 1) card.classList.add("is-leader");
+    if (row.userId === viewerId) card.classList.add("is-viewer");
+
+    const cardTop = document.createElement("div");
+    cardTop.className = "leaderboard-card-top";
+    const rank = document.createElement("span");
+    rank.className = "leaderboard-rank";
+    rank.textContent = row.rank === 1 ? "Leader" : `Rank ${row.rank}`;
+    cardTop.appendChild(rank);
+    if (row.userId === viewerId) {
+      const you = document.createElement("span");
+      you.className = "leaderboard-you";
+      you.textContent = "You";
+      cardTop.appendChild(you);
+    }
+
+    const name = document.createElement("h3");
+    name.textContent = row.name;
+    const score = document.createElement("p");
+    score.className = "leaderboard-score";
+    const number = document.createElement("strong");
+    number.textContent = String(row.total);
+    const unit = document.createElement("span");
+    unit.textContent = "points";
+    score.append(number, unit);
+
+    const meta = document.createElement("p");
+    meta.className = "leaderboard-meta";
+    meta.textContent = `${row.exactHits} exact · ${row.predictionsSubmitted}/${totalScorableMatches} predicted`;
+    card.append(cardTop, name, score, meta);
+    cards.appendChild(card);
+  }
+
+  leaderboardEl.append(heading, cards);
+  leaderboardEl.hidden = false;
+}
+
 function renderTable(rows, totalScorableMatches, viewerId) {
   const table = document.createElement("table");
   table.innerHTML = `
@@ -271,6 +326,15 @@ function renderTable(rows, totalScorableMatches, viewerId) {
       </tr>
     </thead>
   `;
+
+  const caption = document.createElement("caption");
+  caption.className = "sr-only";
+  caption.textContent = "Complete prediction pool standings";
+  table.prepend(caption);
+
+  const scrollHint = document.createElement("p");
+  scrollHint.className = "table-swipe-hint";
+  scrollHint.textContent = "Swipe to see every column →";
 
   const tbody = document.createElement("tbody");
   rows.forEach((row) => {
@@ -306,8 +370,9 @@ function renderTable(rows, totalScorableMatches, viewerId) {
   table.appendChild(tbody);
 
   tableEl.innerHTML = "";
-  tableEl.appendChild(table);
+  tableEl.append(scrollHint, table);
   tableEl.hidden = false;
+  renderLeaderboard(rows, totalScorableMatches, viewerId);
   columnsHelpEl.hidden = false;
   scoringHelpEl.hidden = false;
 }
@@ -385,11 +450,17 @@ function renderSections(specialSections, matchSections) {
 // without needing a reload.
 function renderResult(result, viewerId) {
   if (!result.rows.length) {
+    leaderboardEl.hidden = true;
+    tableEl.hidden = true;
+    sectionsEl.hidden = true;
     showStatus(statusEl, "No players registered yet — ask the organizer.");
     return;
   }
 
   if (result.totalScorableMatches === 0 && !result.specialRevealed) {
+    leaderboardEl.hidden = true;
+    tableEl.hidden = true;
+    sectionsEl.hidden = true;
     showStatus(statusEl, "Standings will appear once the first match kicks off — nothing is scored yet.");
     return;
   }

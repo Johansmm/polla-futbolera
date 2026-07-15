@@ -3,47 +3,98 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Champion &amp; top scorer — Polla World Cup 2026</title>
-  <meta name="theme-color" content="#eef4ef" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#0b120e" media="(prefers-color-scheme: dark)" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css" />
+  <title>Special picks — Polla World Cup 2026</title>
+  <meta name="description" content="Choose your World Cup 2026 champion and tournament top scorer." />
+  <meta name="theme-color" content="#dceef0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0d1726" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="assets/polla-mark.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&amp;family=Spline+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css?v=2" />
 </head>
-<body>
-  <main class="container">
-    <header class="page-header">
-      <p class="eyebrow">⚽ Polla · World Cup 2026</p>
-      <h1>Champion &amp; top scorer</h1>
-      <p id="user-name" class="signed-in" hidden></p>
-      <nav id="site-nav" class="page-nav" aria-label="Pages"></nav>
-    </header>
-    <p id="deadline-hint" class="hint" hidden></p>
-    <p class="hint">Wondering how points are calculated? See <a href="standings.html#scoring-help">the scoring rules</a> on the Standings page.</p>
+<body class="app-page page-special">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header class="page-header site-header">
+    <div class="header-shell">
+      <a id="site-brand" class="brand-lockup" href="index.html" aria-label="Polla home">
+        <img class="brand-mark" src="assets/polla-mark.svg" alt="" width="44" height="44" />
+        <span class="brand-type"><strong>Polla</strong><small>World Cup 2026</small></span>
+      </a>
+      <nav id="site-nav" class="page-nav" aria-label="Pool pages"></nav>
+      <div class="header-tools">
+        <p id="user-name" class="signed-in" hidden></p>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="container" tabindex="-1">
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="page-hero-copy">
+        <p class="eyebrow">Long-range calls</p>
+        <h1 id="page-title">Back the names that go all the way.</h1>
+        <p class="hero-lede">Choose the team that lifts the trophy and the player who owns the scoring chart.</p>
+      </div>
+      <div class="special-hero-stamp" aria-hidden="true">
+        <span>2</span>
+        <p>big calls<br />one deadline</p>
+      </div>
+    </section>
+
+    <div class="special-meta-row">
+      <p id="deadline-hint" class="deadline-banner" hidden></p>
+      <a class="rules-link" href="standings.html#scoring-help" data-token-link="standings.html#scoring-help">How these picks score <span aria-hidden="true">↗</span></a>
+    </div>
     <p id="status" class="status" role="status" hidden></p>
 
-    <form id="special-form" hidden>
-      <section class="phase-section">
-        <h2>Champion</h2>
-        <label for="champion-select">Team</label>
+    <form id="special-form" class="special-form" hidden>
+      <section class="pick-card pick-card-champion">
+        <header class="pick-card-header">
+          <span class="pick-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48"><path d="M15 7h18v9c0 8-3.7 13.2-9 15-5.3-1.8-9-7-9-15V7Z"/><path d="M15 11H8v3c0 6 3.5 10 9 10M33 11h7v3c0 6-3.5 10-9 10M24 31v7M17 42h14"/></svg>
+          </span>
+          <div><p class="pick-kicker">Tournament winner</p><h2>Champion</h2></div>
+        </header>
+        <p class="pick-description">The exact champion earns the biggest return; a finalist still brings points.</p>
+        <label for="champion-select">Team to lift the trophy</label>
         <select id="champion-select" name="champion"></select>
       </section>
 
-      <section class="phase-section">
-        <h2>Top scorer</h2>
-        <label for="scorer-team-select">Country</label>
-        <select id="scorer-team-select" name="scorer-team"></select>
-        <label for="scorer-player-select">Player</label>
-        <select id="scorer-player-select" name="scorer-player" disabled></select>
+      <section class="pick-card pick-card-scorer">
+        <header class="pick-card-header">
+          <span class="pick-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48"><path d="M11 31c8 1 11-6 13-16l7 4c-1 5 1 8 7 10l-4 10H16c-5 0-8-3-5-8Z"/><path d="M23 21l8 3M21 26l9 3M15 39h20"/></svg>
+          </span>
+          <div><p class="pick-kicker">Golden boot</p><h2>Top scorer</h2></div>
+        </header>
+        <p class="pick-description">Start with the country, then choose the player you expect to finish on top.</p>
+        <div class="scorer-fields">
+          <div>
+            <label for="scorer-team-select">Country</label>
+            <select id="scorer-team-select" name="scorer-team"></select>
+          </div>
+          <div>
+            <label for="scorer-player-select">Player</label>
+            <select id="scorer-player-select" name="scorer-player" disabled></select>
+          </div>
+        </div>
       </section>
 
-      <button type="submit" id="submit-btn">Save picks</button>
-      <div id="submit-feedback" class="save-feedback" role="status" hidden></div>
+      <footer class="special-submit">
+        <div class="submit-prompt"><strong>Happy with both calls?</strong><span>You can update them until the deadline.</span></div>
+        <button type="submit" id="submit-btn">Save picks</button>
+        <div id="submit-feedback" class="save-feedback" role="status" hidden></div>
+      </footer>
     </form>
 
-    <div id="locked-view" hidden></div>
+    <div id="locked-view" class="locked-view" hidden></div>
   </main>
-  <footer id="site-footer" class="site-footer"></footer>
-  <script type="module" src="js/nav.js"></script>
-  <script type="module" src="js/special.js"></script>
+
+  <footer id="site-footer" class="site-footer">
+    <span class="footer-copy">Polla · Made for the knockout run</span>
+    <span class="footer-separator" aria-hidden="true">•</span>
+  </footer>
+  <script type="module" src="js/nav.js?v=2"></script>
+  <script type="module" src="js/special.js?v=2"></script>
 </body>
 </html>

@@ -27,10 +27,21 @@ export function showRetry(el, message, onRetry) {
 export function showSignedInName(name) {
   const el = document.getElementById("user-name");
   if (!el || !name) return;
-  el.textContent = "Playing as ";
+
+  el.textContent = "";
+  const avatar = document.createElement("span");
+  avatar.className = "profile-avatar";
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = name.trim().charAt(0).toUpperCase();
+
+  const copy = document.createElement("span");
+  copy.className = "profile-copy";
+  const label = document.createElement("small");
+  label.textContent = "Playing as";
   const strong = document.createElement("strong");
   strong.textContent = name;
-  el.appendChild(strong);
+  copy.append(label, strong);
+  el.append(avatar, copy);
   el.hidden = false;
 }
 
@@ -44,7 +55,7 @@ export function showSignedInName(name) {
 // loads so rows don't shift.
 export function teamFlagImg(crestUrl) {
   if (!crestUrl) return "";
-  return `<img class="team-flag" src="${crestUrl}" alt="" width="20" height="14" loading="lazy" />`;
+  return `<img class="team-flag" src="${crestUrl}" alt="" width="28" height="20" loading="lazy" />`;
 }
 
 // Renders in the viewer's own browser timezone rather than a fixed one —
