@@ -43,22 +43,31 @@ function renderForm(rosters, existingPick) {
 
   function populateScorerPlayers(team) {
     const players = [...(rostersByTeam[team] ?? [])].sort();
-    populateSelect(scorerPlayerSelect, players, "Choose a player…");
+    populateSelect(scorerPlayerSelect, players, "Choose a player");
     scorerPlayerSelect.disabled = players.length === 0;
   }
 
-  populateSelect(championSelect, teamNames, "Choose a team…");
-  populateSelect(scorerTeamSelect, teamNames, "Choose a country…");
-  populateSelect(scorerPlayerSelect, [], "Choose a country first…");
+  populateSelect(championSelect, teamNames, "Choose a team");
+  populateSelect(scorerTeamSelect, teamNames, "Choose a country");
+  populateSelect(scorerPlayerSelect, [], "Choose a country first");
   scorerPlayerSelect.disabled = true;
 
-  scorerTeamSelect.addEventListener("change", () => populateScorerPlayers(scorerTeamSelect.value));
+  function syncCardState(select) {
+    const card = select.closest(".pick-card");
+    if (card) card.classList.toggle("has-value", Boolean(select.value));
+  }
+
+  scorerTeamSelect.addEventListener("change", () => {
+    populateScorerPlayers(scorerTeamSelect.value);
+    syncCardState(scorerTeamSelect);
+  });
 
   // Any change after a save means the picks on screen are no longer the
   // picks that are stored — clear the stale "Saved" confirmation.
   for (const select of [championSelect, scorerTeamSelect, scorerPlayerSelect]) {
     select.addEventListener("change", () => {
       submitFeedback.hidden = true;
+      syncCardState(select);
     });
   }
 
@@ -75,24 +84,52 @@ function renderForm(rosters, existingPick) {
     submitBtn.textContent = "Update picks";
   }
 
+  for (const select of [championSelect, scorerTeamSelect, scorerPlayerSelect]) {
+    syncCardState(select);
+  }
+
   formEl.hidden = false;
 }
 
 function renderLocked(pick, deadlineNotConfigured) {
+  lockedView.textContent = "";
+
+  const kicker = document.createElement("p");
+  kicker.className = "locked-kicker";
+  kicker.textContent = deadlineNotConfigured ? "Picks not open" : "Deadline closed";
+
+  const heading = document.createElement("h2");
+  const copy = document.createElement("p");
+
   if (pick) {
-    lockedView.innerHTML = `
-      <p>Your picks are locked in:</p>
-      <p><strong>Champion:</strong> ${pick.champion_pick}</p>
-      <p><strong>Top scorer:</strong> ${pick.top_scorer_pick}</p>
-    `;
+    heading.textContent = "Your calls are locked in.";
+    copy.textContent = "They will score automatically as the tournament unfolds.";
+
+    const picks = document.createElement("div");
+    picks.className = "locked-picks";
+    for (const [labelText, value] of [
+      ["Champion", pick.champion_pick],
+      ["Top scorer", pick.top_scorer_pick],
+    ]) {
+      const item = document.createElement("div");
+      const label = document.createElement("span");
+      const strong = document.createElement("strong");
+      label.textContent = labelText;
+      strong.textContent = value;
+      item.append(label, strong);
+      picks.appendChild(item);
+    }
+    lockedView.append(kicker, heading, copy, picks);
   } else if (deadlineNotConfigured) {
     // No deadline configured means picks haven't opened yet (editing
     // fails closed) — very different from the user missing a deadline.
-    lockedView.innerHTML =
-      "<p>Picks aren't open yet — the organizer hasn't set the schedule. Check back soon.</p>";
+    heading.textContent = "The picks window is not open yet.";
+    copy.textContent = "The organizer has not set the schedule. Check back once the knockout calendar is ready.";
+    lockedView.append(kicker, heading, copy);
   } else {
-    lockedView.innerHTML =
-      "<p>Picks are locked — the deadline passed before you chose. You can still see everyone's picks on the standings page.</p>";
+    heading.textContent = "The deadline passed before you chose.";
+    copy.textContent = "You can still follow every revealed pick and point on the standings page.";
+    lockedView.append(kicker, heading, copy);
   }
   lockedView.hidden = false;
 }

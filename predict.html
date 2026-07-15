@@ -4,26 +4,65 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>My predictions — Polla World Cup 2026</title>
-  <meta name="theme-color" content="#eef4ef" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#0b120e" media="(prefers-color-scheme: dark)" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css" />
+  <meta name="description" content="Enter and save your World Cup 2026 knockout-stage score predictions." />
+  <meta name="theme-color" content="#dceef0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0d1726" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="assets/polla-mark.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&amp;family=Spline+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css?v=2" />
 </head>
-<body>
-  <main class="container">
-    <header class="page-header">
-      <p class="eyebrow">⚽ Polla · World Cup 2026</p>
-      <h1>My predictions</h1>
-      <p id="user-name" class="signed-in" hidden></p>
-      <nav id="site-nav" class="page-nav" aria-label="Pages"></nav>
-    </header>
-    <p class="hint">Enter both scores and press Save on each match — predictions lock at kickoff.</p>
-    <p class="hint">Wondering how points are calculated? See <a href="standings.html#scoring-help">the scoring rules</a> on the Standings page.</p>
+<body class="app-page page-predict">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header class="page-header site-header">
+    <div class="header-shell">
+      <a id="site-brand" class="brand-lockup" href="index.html" aria-label="Polla home">
+        <img class="brand-mark" src="assets/polla-mark.svg" alt="" width="44" height="44" />
+        <span class="brand-type"><strong>Polla</strong><small>World Cup 2026</small></span>
+      </a>
+      <nav id="site-nav" class="page-nav" aria-label="Pool pages"></nav>
+      <div class="header-tools">
+        <p id="user-name" class="signed-in" hidden></p>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="container" tabindex="-1">
+    <section class="page-hero" aria-labelledby="page-title">
+      <div class="page-hero-copy">
+        <p class="eyebrow">Score desk</p>
+        <h1 id="page-title">Call every score.</h1>
+        <p class="hero-lede">Set the scoreline you see coming. Each match saves on its own and closes at kickoff.</p>
+      </div>
+      <div class="route-block route-block-compact">
+        <p class="route-label">Road to the trophy</p>
+        <ol class="tournament-route" aria-label="Knockout tournament stages">
+          <li><span class="route-code">R16</span><span class="route-name">Round of 16</span></li>
+          <li><span class="route-code">QF</span><span class="route-name">Quarterfinals</span></li>
+          <li><span class="route-code">SF</span><span class="route-name">Semifinals</span></li>
+          <li><span class="route-code">F</span><span class="route-name">Final</span></li>
+          <li class="is-trophy"><span class="route-code">CUP</span><span class="route-name">Champion</span></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="instruction-strip" aria-label="How to submit predictions">
+      <div class="instruction"><span>01</span><p><strong>Enter both scores</strong><small>Whole numbers from 0 to 99.</small></p></div>
+      <div class="instruction"><span>02</span><p><strong>Save each match</strong><small>Unsaved edits stay clearly marked.</small></p></div>
+      <div class="instruction"><span>03</span><p><strong>Beat the kickoff</strong><small>Your pick locks automatically.</small></p></div>
+      <a class="rules-link" href="standings.html#scoring-help" data-token-link="standings.html#scoring-help">Scoring rules <span aria-hidden="true">↗</span></a>
+    </section>
+
     <p id="status" class="status" role="status" hidden></p>
-    <form id="predictions-form" hidden></form>
+    <form id="predictions-form" class="predictions-form" hidden></form>
   </main>
-  <footer id="site-footer" class="site-footer"></footer>
-  <script type="module" src="js/nav.js"></script>
-  <script type="module" src="js/predict.js"></script>
+
+  <footer id="site-footer" class="site-footer">
+    <span class="footer-copy">Polla · Made for the knockout run</span>
+    <span class="footer-separator" aria-hidden="true">•</span>
+  </footer>
+  <script type="module" src="js/nav.js?v=2"></script>
+  <script type="module" src="js/predict.js?v=2"></script>
 </body>
 </html>

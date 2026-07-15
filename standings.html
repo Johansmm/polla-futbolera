@@ -4,40 +4,73 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Standings — Polla World Cup 2026</title>
-  <meta name="theme-color" content="#eef4ef" media="(prefers-color-scheme: light)" />
-  <meta name="theme-color" content="#0b120e" media="(prefers-color-scheme: dark)" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/style.css" />
+  <meta name="description" content="Follow the live Polla standings, scoring rules, and prediction breakdowns." />
+  <meta name="theme-color" content="#dceef0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0d1726" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="assets/polla-mark.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&amp;family=Spline+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css?v=2" />
 </head>
-<body>
-  <main class="container">
-    <header class="page-header">
-      <p class="eyebrow">⚽ Polla · World Cup 2026</p>
-      <h1>Standings</h1>
-      <p id="user-name" class="signed-in" hidden></p>
-      <nav id="site-nav" class="page-nav" aria-label="Pages"></nav>
-    </header>
+<body class="app-page page-standings">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <header class="page-header site-header">
+    <div class="header-shell">
+      <a id="site-brand" class="brand-lockup" href="index.html" aria-label="Polla home">
+        <img class="brand-mark" src="assets/polla-mark.svg" alt="" width="44" height="44" />
+        <span class="brand-type"><strong>Polla</strong><small>World Cup 2026</small></span>
+      </a>
+      <nav id="site-nav" class="page-nav" aria-label="Pool pages"></nav>
+      <div class="header-tools">
+        <p id="user-name" class="signed-in" hidden></p>
+      </div>
+    </div>
+  </header>
+
+  <main id="main-content" class="container" tabindex="-1">
+    <section class="page-hero standings-hero" aria-labelledby="page-title">
+      <div class="page-hero-copy">
+        <p class="eyebrow">Live table</p>
+        <h1 id="page-title">Every call, counted.</h1>
+        <p class="hero-lede">Match points, special picks, exact hits, and the gap to the group—all in one live race.</p>
+      </div>
+      <div class="table-signal" aria-label="Standings update status">
+        <span class="signal-dot" aria-hidden="true"></span>
+        <div><strong>Live scoring</strong><small>Updates while matches are in play</small></div>
+      </div>
+    </section>
+
     <p id="status" class="status" role="status" hidden></p>
-    <p id="standings-note" class="hint" hidden></p>
-    <details id="scoring-help" class="columns-help" hidden>
-      <summary>How are points calculated?</summary>
-    </details>
-    <details id="columns-help" class="columns-help" hidden>
-      <summary>What do these columns mean?</summary>
-      <ul>
-        <li><strong>Preds:</strong> how many of the already-locked matches this player actually predicted, out of the total locked so far.</li>
-        <li><strong>Exact:</strong> matches where the player guessed the exact final score.</li>
-        <li><strong>Match pts:</strong> points earned from match predictions (outcome tier × phase multiplier), summed across every scored match.</li>
-        <li><strong>Special:</strong> combined points from the champion and top scorer picks.</li>
-        <li><strong>Total:</strong> Match pts + Special.</li>
-        <li><strong>± Avg:</strong> how many points above (green, +) or below (red, −) the group's average total.</li>
-      </ul>
-    </details>
-    <div id="standings-table" hidden></div>
-    <div id="breakdown-sections" hidden></div>
+    <p id="standings-note" class="standings-note" hidden></p>
+
+    <section class="standings-help" aria-label="Standings help">
+      <details id="scoring-help" class="info-disclosure" hidden>
+        <summary><span><strong>How points work</strong><small>Outcome tiers, phase multipliers, and tie-breaks</small></span></summary>
+      </details>
+      <details id="columns-help" class="info-disclosure" hidden>
+        <summary><span><strong>Read the table</strong><small>A quick guide to every column</small></span></summary>
+        <ul>
+          <li><strong>Preds:</strong> predictions submitted for already-locked matches.</li>
+          <li><strong>Exact:</strong> matches where the player called the exact final score.</li>
+          <li><strong>Match pts:</strong> outcome points multiplied by the match phase.</li>
+          <li><strong>Special:</strong> champion and top-scorer points combined.</li>
+          <li><strong>Total:</strong> match points plus special-pick points.</li>
+          <li><strong>± Avg:</strong> the player's gap above or below the group average.</li>
+        </ul>
+      </details>
+    </section>
+
+    <section id="leaderboard-stage" class="leaderboard-stage" aria-label="Front runners" hidden></section>
+    <div id="standings-table" class="standings-table" hidden></div>
+    <div id="breakdown-sections" class="breakdown-sections" hidden></div>
   </main>
-  <footer id="site-footer" class="site-footer"></footer>
-  <script type="module" src="js/nav.js"></script>
-  <script type="module" src="js/standings.js"></script>
+
+  <footer id="site-footer" class="site-footer">
+    <span class="footer-copy">Polla · Made for the knockout run</span>
+    <span class="footer-separator" aria-hidden="true">•</span>
+  </footer>
+  <script type="module" src="js/nav.js?v=2"></script>
+  <script type="module" src="js/standings.js?v=2"></script>
 </body>
 </html>
