@@ -13,13 +13,19 @@ const DAY = 24 * 60 * 60 * 1000;
 let mergeMatchData;
 let selectScorableMatches;
 let computeStandingsFromData;
+let computePointsEvolution;
 let hasMatchNeedingRefresh;
 let selectNewlyScorableMatches;
 
 test.before(async () => {
   ({ mergeMatchData } = await import("../js/worker-matches.mjs"));
-  ({ selectScorableMatches, computeStandingsFromData, hasMatchNeedingRefresh, selectNewlyScorableMatches } =
-    await import("../js/standings-logic.mjs"));
+  ({
+    selectScorableMatches,
+    computeStandingsFromData,
+    computePointsEvolution,
+    hasMatchNeedingRefresh,
+    selectNewlyScorableMatches,
+  } = await import("../js/standings-logic.mjs"));
 });
 
 const SCORING_CONFIG = {
@@ -531,6 +537,258 @@ test("computeStandingsFromData crowns nobody in a section where everyone scored 
     [0, 0]
   );
   assert.ok(matchSection.entries.every((e) => e.top === false));
+});
+
+// computePointsEvolution (issue #24) — the running-total series behind the
+// standings page's points-evolution chart.
+test("computePointsEvolution steps through resolved matches in kickoff order, skipping a locked-but-unresolved one", () => {
+  const { finishedR16, upcomingR16, final } = buildScenario();
+  // finishedR16 kicked off before `final`; upcomingR16 is locked-but-unresolved
+  // in a real scenario, but here it's still SCHEDULED (see buildScenario), so
+  // it should be excluded from scorableMatches entirely regardless.
+  const scorableMatches = selectScorableMatches([finishedR16, upcomingR16, final], SCORING_CONFIG);
+
+  const users = [
+    { user_id: "alice", name: "Alice" },
+    { user_id: "bob", name: "Bob" },
+  ];
+  const predictionsByMatch = {
+    r16_01: {
+      alice: { predicted_score_a: 2, predicted_score_b: 1 }, // exact (5)
+      bob: { predicted_score_a: 0, predicted_score_b: 0 }, // miss (0)
+    },
+    final_01: {
+      alice: { predicted_score_a: 1, predicted_score_b: 0 }, // correct winner/wrong margin, x3 (3)
+      bob: { predicted_score_a: 2, predicted_score_b: 0 }, // exact, x3 (15)
+    },
+  };
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches: [finishedR16, upcomingR16, final],
+    tournamentResults: null,
+    predictionsByMatch,
+    specialPicks: {},
+    specialRevealed: false,
+  });
+
+  const evolution = computePointsEvolution(result.rows, scorableMatches, false, SCORING_CONFIG);
+  assert.deepEqual(
+    evolution.steps.map((s) => s.matchId),
+    ["r16_01", "final_01"]
+  );
+
+  const alice = evolution.series.find((s) => s.name === "Alice");
+  const bob = evolution.series.find((s) => s.name === "Bob");
+  assert.deepEqual(alice.values, [5, 5 + 3]);
+  assert.deepEqual(bob.values, [0, 0 + 15]);
+  // stepPoints is each match's own contribution, un-accumulated — what the
+  // standings page's "per match" chart view plots, since the cumulative
+  // total alone can't show who had one match carry their whole score.
+  assert.deepEqual(alice.stepPoints, [5, 3]);
+  assert.deepEqual(bob.stepPoints, [0, 15]);
+
+  // average mirrors computeStandingsFromData's row.vsAverage baseline — the
+  // group mean at each step, for the chart's reference line.
+  assert.deepEqual(evolution.average.values, [(5 + 0) / 2, (8 + 15) / 2]);
+  assert.deepEqual(evolution.average.stepPoints, [(5 + 0) / 2, (3 + 15) / 2]);
+
+  // maxPoints is the theoretical ceiling (exact score × phase multiplier),
+  // not the highest score anyone actually got — the heatmap view normalizes
+  // color intensity against this so a modest round doesn't display as if
+  // someone maxed it out.
+  assert.deepEqual(
+    evolution.steps.map((s) => s.maxPoints),
+    [5 * 1, 5 * 3]
+  );
+});
+
+test("computePointsEvolution adds a trailing step for champion/top-scorer points once special picks are revealed", () => {
+  const { finishedR16, final } = buildScenario();
+  const scorableMatches = selectScorableMatches([finishedR16, final], SCORING_CONFIG);
+  const users = [{ user_id: "alice", name: "Alice" }];
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches: [finishedR16, final],
+    tournamentResults: null,
+    predictionsByMatch: { r16_01: {}, final_01: {} },
+    specialPicks: { alice: { champion_pick: "Argentina" } }, // exact champion (8)
+    specialRevealed: true,
+  });
+
+  const evolution = computePointsEvolution(result.rows, scorableMatches, true, SCORING_CONFIG);
+  assert.equal(evolution.steps.length, 3);
+  assert.equal(evolution.steps.at(-1).label, "Special picks");
+
+  const [alice] = evolution.series;
+  assert.equal(alice.values.length, 3);
+  assert.equal(alice.values.at(-1), alice.values.at(-2) + 8);
+});
+
+test("computePointsEvolution numbers axis labels per phase (R1, R2, …), stable regardless of resolve order", () => {
+  const r16Match1 = mergeMatchData(
+    { id: "r16_01", match_id: "r16_01", kickoff_at: new Date(Date.now() - 2 * DAY), source_match_id: 1 },
+    toSourceMap([
+      {
+        id: 1,
+        stage: "LAST_16",
+        status: "FINISHED",
+        homeTeam: { name: "Canada", crest: null },
+        awayTeam: { name: "Morocco", crest: null },
+        score: { duration: "REGULAR", fullTime: { home: 2, away: 1 } },
+      },
+    ])
+  );
+  // r16_02 kicked off after r16_01 but hasn't resolved yet — its axis
+  // position must still be reserved as "R2", not silently skipped/relabeled
+  // once it eventually finishes.
+  const r16Match2 = mergeMatchData(
+    { id: "r16_02", match_id: "r16_02", kickoff_at: new Date(Date.now() - DAY), source_match_id: 2 },
+    toSourceMap([
+      {
+        id: 2,
+        stage: "LAST_16",
+        status: "SCHEDULED",
+        homeTeam: { name: "Spain", crest: null },
+        awayTeam: { name: "Japan", crest: null },
+        score: { fullTime: { home: null, away: null } },
+      },
+    ])
+  );
+  const finalMatch = mergeMatchData(
+    { id: "final_01", match_id: "final_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 3 },
+    toSourceMap([
+      {
+        id: 3,
+        stage: "FINAL",
+        status: "FINISHED",
+        homeTeam: { name: "Argentina", crest: null },
+        awayTeam: { name: "Brazil", crest: null },
+        score: { duration: "REGULAR", fullTime: { home: 2, away: 0 } },
+      },
+    ])
+  );
+
+  const matches = [r16Match1, r16Match2, finalMatch];
+  const scorableMatches = selectScorableMatches(matches, SCORING_CONFIG);
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users: [{ user_id: "alice", name: "Alice" }],
+    matches,
+    tournamentResults: null,
+    predictionsByMatch: { r16_01: {}, final_01: {} },
+    specialPicks: {},
+    specialRevealed: false,
+  });
+
+  const evolution = computePointsEvolution(result.rows, scorableMatches, false, SCORING_CONFIG);
+  // r16_02 is locked-but-unresolved (still SCHEDULED), so it contributes no
+  // step of its own — but it still occupies "R2" in the counting, so
+  // r16_01 stays "R1" rather than being renumbered once r16_02 resolves.
+  assert.deepEqual(
+    evolution.steps.map((s) => s.shortLabel),
+    ["R1", "F"]
+  );
+});
+
+test("computePointsEvolution includes a currently-live match as a step, using its provisional score", () => {
+  const { finishedR16 } = buildScenario();
+  const liveFinal = mergeMatchData(
+    { id: "final_01", match_id: "final_01", kickoff_at: new Date(Date.now() - DAY), source_match_id: 3 },
+    toSourceMap([
+      {
+        id: 3,
+        stage: "FINAL",
+        status: "IN_PLAY",
+        homeTeam: { name: "Argentina", crest: null },
+        awayTeam: { name: "Brazil", crest: null },
+        score: { duration: "REGULAR", fullTime: { home: 1, away: 0 } },
+      },
+    ])
+  );
+  const matches = [finishedR16, liveFinal];
+  const scorableMatches = selectScorableMatches(matches, SCORING_CONFIG);
+  const users = [{ user_id: "alice", name: "Alice" }];
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches,
+    tournamentResults: null,
+    predictionsByMatch: {
+      r16_01: { alice: { predicted_score_a: 2, predicted_score_b: 1 } }, // exact (5)
+      final_01: { alice: { predicted_score_a: 1, predicted_score_b: 0 } }, // exact vs. the live score, x3 (15)
+    },
+    specialPicks: {},
+    specialRevealed: false,
+  });
+
+  const evolution = computePointsEvolution(result.rows, scorableMatches, false, SCORING_CONFIG);
+  assert.deepEqual(
+    evolution.steps.map((s) => s.matchId),
+    ["r16_01", "final_01"]
+  );
+  assert.equal(evolution.steps[1].shortLabel, "F \u{1F534}");
+  assert.match(evolution.steps[1].label, /\(Live\)$/);
+
+  const [alice] = evolution.series;
+  assert.deepEqual(alice.values, [5, 5 + 15]);
+});
+
+test("computePointsEvolution sorts series alphabetically by name, independent of the rows' rank order", () => {
+  const { finishedR16 } = buildScenario();
+  const scorableMatches = selectScorableMatches([finishedR16], SCORING_CONFIG);
+
+  // Zoe outranks Alice on points, so `rows` (sorted by rank) lists Zoe
+  // first — the chart's series order must not follow that.
+  const users = [
+    { user_id: "alice", name: "Alice" },
+    { user_id: "zoe", name: "Zoe" },
+  ];
+  const predictionsByMatch = {
+    r16_01: {
+      alice: { predicted_score_a: 0, predicted_score_b: 0 }, // miss
+      zoe: { predicted_score_a: 2, predicted_score_b: 1 }, // exact
+    },
+  };
+
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users,
+    matches: [finishedR16],
+    tournamentResults: null,
+    predictionsByMatch,
+    specialPicks: {},
+    specialRevealed: false,
+  });
+  assert.equal(result.rows[0].name, "Zoe"); // ranked first
+
+  const evolution = computePointsEvolution(result.rows, scorableMatches, false, SCORING_CONFIG);
+  assert.deepEqual(
+    evolution.series.map((s) => s.name),
+    ["Alice", "Zoe"]
+  );
+});
+
+test("computePointsEvolution returns no steps when nothing has finished yet", () => {
+  const { upcomingR16 } = buildScenario();
+  const scorableMatches = selectScorableMatches([upcomingR16], SCORING_CONFIG);
+  const result = computeStandingsFromData({
+    scoringConfig: SCORING_CONFIG,
+    users: [{ user_id: "alice", name: "Alice" }],
+    matches: [upcomingR16],
+    tournamentResults: null,
+    predictionsByMatch: {},
+    specialPicks: {},
+    specialRevealed: false,
+  });
+
+  const evolution = computePointsEvolution(result.rows, scorableMatches, false, SCORING_CONFIG);
+  assert.deepEqual(evolution.steps, []);
+  assert.deepEqual(evolution.series[0].values, []);
 });
 
 // hasMatchNeedingRefresh backs standings.js's poll loop: a network-free

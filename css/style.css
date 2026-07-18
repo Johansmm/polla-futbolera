@@ -2036,6 +2036,163 @@ select:disabled {
   font: 600 0.64rem/1.4 var(--font-data);
 }
 
+/* ---- points evolution chart ---- */
+
+.points-evolution {
+  margin-top: var(--space-6);
+}
+
+.chart-toggle {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.chart-toggle-btn {
+  flex: 1;
+  min-height: 36px;
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--ink);
+  font: 700 0.68rem/1 var(--font-data);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.chart-toggle-btn:hover {
+  background: var(--surface-muted);
+}
+
+.chart-toggle-btn.is-active {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--brand-contrast);
+}
+
+.phase-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.phase-filter-btn {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font: 700 0.62rem/1 var(--font-data);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
+}
+
+.phase-filter-btn:hover {
+  background: var(--surface-muted);
+}
+
+.phase-filter-btn.is-active {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--brand-contrast);
+}
+
+.chart-card {
+  position: relative;
+  height: 320px;
+  padding: var(--space-5) var(--space-4) var(--space-3);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  box-shadow: var(--small-shadow);
+}
+
+/* The heatmap's row count scales with the number of players, unlike the
+   canvas views — a fixed height would either clip rows or squeeze them
+   unreadably, so this view gets an auto height (capped, then scrollable)
+   instead. */
+.chart-card.is-heatmap {
+  height: auto;
+  max-height: 480px;
+  overflow: auto;
+}
+
+.points-heatmap {
+  overflow-x: auto;
+}
+
+.heatmap-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.heatmap-table th,
+.heatmap-table td {
+  padding: 0;
+  border: 1px solid var(--surface);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.heatmap-table thead th {
+  padding: 0 6px 6px;
+  background: none;
+  color: var(--ink-faint);
+  font: 700 0.6rem/1 var(--font-data);
+  letter-spacing: 0.03em;
+}
+
+.heatmap-table tbody th {
+  position: sticky;
+  left: 0;
+  padding: 0 var(--space-3) 0 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 700 0.7rem/1 var(--font-body);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.heatmap-table tbody th .you-tag {
+  margin-left: 4px;
+}
+
+.heatmap-cell {
+  min-width: 30px;
+  height: 26px;
+  color: var(--ink);
+  font: 600 0.62rem/1 var(--font-data);
+}
+
+.heatmap-row.is-average td.heatmap-cell {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.chart-empty-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 var(--space-5);
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
 /* ---- standings table ---- */
 
 .standings-table {
@@ -2389,6 +2546,10 @@ td.num {
   .leaderboard-card.is-leader {
     translate: 0;
   }
+
+  .chart-card {
+    height: 260px;
+  }
 }
 
 @media (max-width: 620px) {
@@ -2397,6 +2558,16 @@ td.num {
   .container,
   .site-footer {
     width: min(100% - 28px, 1180px);
+  }
+
+  /* Four toggle buttons squeezed into one row get unreadably narrow on a
+     phone — wrap into a 2x2 grid instead. */
+  .chart-toggle {
+    flex-wrap: wrap;
+  }
+
+  .chart-toggle-btn {
+    flex: 1 1 calc(50% - var(--space-2));
   }
 
   .landing-header {

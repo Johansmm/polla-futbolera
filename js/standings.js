@@ -6,6 +6,7 @@ import {
   query,
   where,
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import Chart from "https://esm.sh/chart.js@4.4.9/auto";
 import { db } from "./firebase-init.js";
 import { resolveUserFromToken } from "./token-gate.js";
 import { showStatus, showRetry, showSignedInName } from "./ui.js";
@@ -28,6 +29,12 @@ import {
 const statusEl = document.getElementById("status");
 const noteEl = document.getElementById("standings-note");
 const leaderboardEl = document.getElementById("leaderboard-stage");
+const pointsEvolutionEl = document.getElementById("points-evolution");
+const chartCardEl = document.getElementById("points-evolution-card");
+const pointsEvolutionCanvas = document.getElementById("points-evolution-canvas");
+const heatmapEl = document.getElementById("points-evolution-heatmap");
+const chartEmptyEl = document.getElementById("points-evolution-empty");
+const phaseFilterEl = document.getElementById("phase-filter");
 const tableEl = document.getElementById("standings-table");
 const sectionsEl = document.getElementById("breakdown-sections");
 const columnsHelpEl = document.getElementById("columns-help");
@@ -310,6 +317,420 @@ function renderLeaderboard(rows, totalScorableMatches, viewerId) {
   leaderboardEl.hidden = false;
 }
 
+// Evenly spread hues via the golden angle, rather than a fixed-size
+// palette — the group's actual size isn't a technical constraint anywhere
+// in this design (see CLAUDE.md), so any number of players still gets
+// visually distinct line colors. alpha lets the leader's fill gradient
+// reuse the same hue as its line instead of a second, hardcoded color.
+function seriesColor(index, alpha = 1) {
+  const hue = Math.round((index * 137.508) % 360);
+  return `hsl(${hue} 65% 45% / ${alpha})`;
+}
+
+function chartThemeColors() {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const cssVar = (name) => rootStyle.getPropertyValue(name).trim();
+  return {
+    ink: cssVar("--ink"),
+    inkFaint: cssVar("--ink-faint"),
+    inkSoft: cssVar("--ink-soft"),
+    lineSoft: cssVar("--line-soft"),
+  };
+}
+
+// Shared by both chart views — a dashed, neutral reference line rather than
+// another hue from seriesColor's palette, so it reads as "the baseline"
+// (mirroring the standings table's own "± Avg" column) instead of
+// competing with the players' own lines/bars for attention.
+function averageDatasetOptions() {
+  const { inkSoft } = chartThemeColors();
+  return {
+    label: "Average",
+    borderColor: inkSoft,
+    borderDash: [6, 4],
+    borderWidth: 2,
+    pointRadius: 0,
+    pointHoverRadius: 3,
+    fill: false,
+  };
+}
+
+// Shared by every chart view below — everything except the data/type
+// itself (legend, tooltip title resolved from `steps` rather than the
+// short axis tick, theme colors, reduced-motion). beginAtZero is false only
+// for the "vs Average" view, whose values are a deviation that can go
+// negative — forcing the axis to start at 0 there would clip anyone below
+// the average clean off the chart.
+function baseChartOptions(steps, { beginAtZero = true } = {}) {
+  const { ink, inkFaint, lineSoft } = chartThemeColors();
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: reducedMotion ? false : undefined,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: {
+        position: "bottom",
+        labels: {
+          color: ink,
+          usePointStyle: true,
+          boxWidth: 8,
+          font: { family: "Spline Sans", size: 11 },
+          // Chart.js's default legend list follows each dataset's `order`
+          // (used above purely for draw depth — the viewer's/average's
+          // line drawn on top), so without this override the legend itself
+          // reshuffles between the two chart views even though the
+          // underlying `datasets` array is built in the same stable order
+          // (alphabetical, "Average" last) both times. Re-sort back to
+          // that array order so the legend reads the same regardless of
+          // which view (or who's the viewer) is showing.
+          generateLabels: (chart) =>
+            Chart.defaults.plugins.legend.labels.generateLabels(chart).sort((a, b) => a.datasetIndex - b.datasetIndex),
+        },
+      },
+      // The full match description (team names + phase, "(Live)" suffix
+      // included) lives in the tooltip title instead of the short axis
+      // label — cramming it onto the axis itself wouldn't fit next to a
+      // dozen other tick labels.
+      tooltip: {
+        callbacks: { title: (items) => steps[items[0].dataIndex].label },
+      },
+    },
+    scales: {
+      x: {
+        ticks: { color: inkFaint, maxRotation: 0, font: { size: 10 } },
+        grid: { color: lineSoft },
+      },
+      y: {
+        beginAtZero,
+        ticks: { color: inkFaint, font: { size: 10 } },
+        grid: { color: lineSoft },
+      },
+    },
+  };
+}
+
+// Running totals, one line per user — the headline view: who's leading and
+// by how much, as of each resolved match.
+function buildCumulativeChart(steps, series, viewerId, average) {
+  let leaderIndex = 0;
+  series.forEach((s, index) => {
+    if (s.values.at(-1) > series[leaderIndex].values.at(-1)) leaderIndex = index;
+  });
+
+  const datasets = series.map((s, index) => {
+    const isViewer = s.userId === viewerId;
+    return {
+      label: isViewer ? `${s.name} (you)` : s.name,
+      data: s.values,
+      borderColor: seriesColor(index),
+      backgroundColor: seriesColor(index),
+      tension: 0.35,
+      pointRadius: 2.5,
+      pointHoverRadius: 5,
+      borderWidth: isViewer ? 3.5 : 1.75,
+      // Drawn last (on top of every other line) so the viewer can always
+      // find themselves, regardless of alphabetical position.
+      order: isViewer ? 0 : 1,
+      fill: index === leaderIndex ? "origin" : false,
+    };
+  });
+
+  // Fixed height rather than the canvas's current clientHeight: the chart
+  // can render on the very tick that flips `hidden` off, before layout has
+  // given the canvas real dimensions, and createLinearGradient needs a
+  // height up front — this only has to roughly match .chart-card's CSS
+  // height for the fade to look right.
+  const gradient = pointsEvolutionCanvas.getContext("2d").createLinearGradient(0, 0, 0, 300);
+  gradient.addColorStop(0, seriesColor(leaderIndex, 0.3));
+  gradient.addColorStop(1, seriesColor(leaderIndex, 0));
+  datasets[leaderIndex].backgroundColor = gradient;
+
+  datasets.push({ ...averageDatasetOptions(), data: average.values, tension: 0.35, order: 2 });
+
+  return new Chart(pointsEvolutionCanvas, {
+    type: "line",
+    data: { labels: steps.map((s) => s.shortLabel), datasets },
+    options: baseChartOptions(steps),
+  });
+}
+
+// Cumulative totals re-based to the group average — the same running
+// totals as buildCumulativeChart, but plotted as each user's gap to the
+// average at that step instead of their raw total. Answers "who's ahead of
+// the pack and by how much" without needing to mentally subtract two
+// lines. average re-based to itself is always exactly 0, so that dataset
+// becomes a flat zero line here — the chart's baseline rather than a
+// second copy of the same reference.
+function buildVsAverageChart(steps, series, viewerId, average) {
+  const datasets = series.map((s, index) => {
+    const isViewer = s.userId === viewerId;
+    const deviation = s.values.map((v, i) => Math.round((v - average.values[i]) * 10) / 10);
+    return {
+      label: isViewer ? `${s.name} (you)` : s.name,
+      data: deviation,
+      borderColor: seriesColor(index),
+      backgroundColor: seriesColor(index),
+      tension: 0.35,
+      pointRadius: 2.5,
+      pointHoverRadius: 5,
+      borderWidth: isViewer ? 3.5 : 1.75,
+      order: isViewer ? 0 : 1,
+      fill: false,
+    };
+  });
+
+  datasets.push({ ...averageDatasetOptions(), data: steps.map(() => 0), tension: 0, pointRadius: 0, order: 2 });
+
+  const options = baseChartOptions(steps, { beginAtZero: false });
+  // "+3" reads clearer than "3" for a value that's explicitly a gap above
+  // or below the average — matches the standings table's own "± Avg"
+  // column formatting (standings.js's formatDelta).
+  options.plugins.tooltip.callbacks.label = (item) => `${item.dataset.label}: ${item.parsed.y > 0 ? "+" : ""}${item.parsed.y}`;
+
+  return new Chart(pointsEvolutionCanvas, {
+    type: "line",
+    data: { labels: steps.map((s) => s.shortLabel), datasets },
+    options,
+  });
+}
+
+// Un-accumulated points per match, one bar per user per match (grouped, not
+// stacked) — surfaces the volatility the cumulative view can't (it only
+// ever goes up): who's contributing steadily each round versus who had one
+// match carry their whole total. Deliberately not stacked: a stacked bar's
+// total height is the *group's combined* points, which reads as if a
+// single player scored that much — grouped bars keep each bar's height
+// tied to one player's own points, capped at whatever that match's outcome
+// tiers/phase multiplier can actually award.
+function buildPerMatchChart(steps, series, viewerId, average) {
+  const datasets = series.map((s, index) => {
+    const isViewer = s.userId === viewerId;
+    return {
+      label: isViewer ? `${s.name} (you)` : s.name,
+      data: s.stepPoints,
+      backgroundColor: seriesColor(index, isViewer ? 0.95 : 0.75),
+      borderColor: isViewer ? seriesColor(index) : "transparent",
+      borderWidth: isViewer ? 2 : 0,
+      borderRadius: 3,
+      order: 2,
+    };
+  });
+
+  // Mixed chart: a line dataset overlaid on a bar chart, same as
+  // buildCumulativeChart's reference line — Chart.js supports per-dataset
+  // `type` for exactly this. order: 1 (lower than the bars' 2) keeps it
+  // drawn on top instead of hidden behind them.
+  datasets.push({ ...averageDatasetOptions(), type: "line", data: average.stepPoints, tension: 0.3, order: 1 });
+
+  return new Chart(pointsEvolutionCanvas, {
+    type: "bar",
+    data: { labels: steps.map((s) => s.shortLabel), datasets },
+    options: baseChartOptions(steps),
+  });
+}
+
+// One row per user, one column per match — the same stepPoints as the
+// per-match bar chart, but a grid scales to any number of players without
+// squeezing bar widths (issue feedback: too many bars once the pool grows).
+// Cell intensity is normalized against that match's *theoretical* ceiling
+// (step.maxPoints, from scoring_config.json's outcome tiers × phase
+// multiplier) rather than the best score anyone actually got that round —
+// otherwise a round where everyone missed would render its best (mediocre)
+// score as if it were a perfect one. Not Chart.js: it has no built-in
+// matrix/heatmap chart type, and pulling in a second charting plugin for
+// one view isn't worth it — a plain table gets the same result with less
+// code.
+function renderHeatmap(steps, series, viewerId, average) {
+  heatmapEl.textContent = "";
+
+  const table = document.createElement("table");
+  table.className = "heatmap-table";
+
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  headRow.appendChild(document.createElement("th")); // corner cell, above the row labels
+  for (const step of steps) {
+    const th = document.createElement("th");
+    th.textContent = step.shortLabel;
+    th.title = step.label;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+
+  function addRow(label, isViewer, stepPoints, colorFor) {
+    const tr = document.createElement("tr");
+    tr.className = "heatmap-row";
+    const th = document.createElement("th");
+    th.textContent = label;
+    if (isViewer) {
+      const you = document.createElement("span");
+      you.className = "you-tag";
+      you.textContent = "(you)";
+      th.appendChild(you);
+    }
+    tr.appendChild(th);
+
+    stepPoints.forEach((points, stepIndex) => {
+      const step = steps[stepIndex];
+      const clamped = step.maxPoints > 0 ? Math.min(Math.max(points / step.maxPoints, 0), 1) : 0;
+      const td = document.createElement("td");
+      td.className = "heatmap-cell";
+      td.style.backgroundColor = colorFor(clamped);
+      const rounded = Math.round(points * 10) / 10;
+      td.textContent = String(rounded);
+      td.title = `${label} — ${step.label}: ${rounded} pt${rounded === 1 ? "" : "s"}`;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+
+  series.forEach((s, index) => {
+    // A 0-point cell still gets a faint tint (alpha's floor) so every cell
+    // reads as part of the grid, not a missing one.
+    addRow(s.name, s.userId === viewerId, s.stepPoints, (clamped) => seriesColor(index, 0.12 + clamped * 0.78));
+  });
+
+  // Styled distinctly (grayscale, see .is-average) rather than another hue
+  // — it's a reference baseline, not another player.
+  addRow("Average", false, average.stepPoints, (clamped) => `hsl(0 0% 50% / ${0.1 + clamped * 0.6})`);
+  tbody.lastElementChild.classList.add("is-average");
+
+  table.appendChild(tbody);
+  heatmapEl.appendChild(table);
+}
+
+let pointsChart = null;
+let chartType = "cumulative"; // "cumulative" | "per-match" — toggled by the buttons below.
+// Cached so the toggle buttons/phase filter can re-render without needing a
+// fresh computeStandings() call — both are pure client-side redraws.
+let lastPointsEvolution = { steps: [], series: [] };
+let lastViewerId = null;
+
+// Which phases (plus the synthetic "special" step) are currently shown —
+// null until the first real data arrives, at which point every phase seen
+// starts active. A Set rather than re-deriving from `steps` each time, so a
+// phase the visitor deliberately hid stays hidden as later matches resolve.
+let activePhases = null;
+const knownPhaseKeys = new Set();
+
+function ensurePhaseState(phaseKeys) {
+  for (const key of phaseKeys) {
+    if (knownPhaseKeys.has(key)) continue;
+    knownPhaseKeys.add(key);
+    (activePhases ??= new Set()).add(key);
+  }
+}
+
+function renderPhaseFilter(phases) {
+  if (phases.length < 2) {
+    phaseFilterEl.hidden = true;
+    phaseFilterEl.textContent = "";
+    return;
+  }
+  phaseFilterEl.hidden = false;
+  phaseFilterEl.textContent = "";
+  for (const { key, label } of phases) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "phase-filter-btn";
+    if (activePhases.has(key)) btn.classList.add("is-active");
+    btn.textContent = label;
+    btn.addEventListener("click", () => {
+      // Keep at least one phase active — an empty filter would just blank
+      // the chart with no way back short of reloading the page.
+      if (activePhases.has(key) && activePhases.size === 1) return;
+      if (activePhases.has(key)) activePhases.delete(key);
+      else activePhases.add(key);
+      renderPointsEvolution(lastPointsEvolution, lastViewerId);
+    });
+    phaseFilterEl.appendChild(btn);
+  }
+}
+
+const chartToggleButtons = document.querySelectorAll(".chart-toggle-btn");
+chartToggleButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.chart === chartType) return;
+    chartType = btn.dataset.chart;
+    chartToggleButtons.forEach((b) => b.classList.toggle("is-active", b === btn));
+    renderPointsEvolution(lastPointsEvolution, lastViewerId);
+  });
+});
+
+// series is already sorted alphabetically by standings-logic.mjs, not by
+// rank — rank reshuffles every poll tick, and shuffling colors/order along
+// with it would make either chart view far harder to read than a stable
+// order.
+function renderPointsEvolution(pointsEvolution, viewerId) {
+  lastPointsEvolution = pointsEvolution;
+  lastViewerId = viewerId;
+  const { steps, series, average } = pointsEvolution;
+
+  // A single step has nothing to trace a trend across — hide rather than
+  // show a chart that's just one column of dots/bars.
+  if (steps.length < 2 || !series.length) {
+    pointsEvolutionEl.hidden = true;
+    pointsChart?.destroy();
+    pointsChart = null;
+    return;
+  }
+  pointsEvolutionEl.hidden = false;
+
+  const phaseKeys = [...new Set(steps.map((s) => s.phase))];
+  ensurePhaseState(phaseKeys);
+  renderPhaseFilter(phaseKeys.map((key) => ({ key, label: key === "special" ? "Special picks" : (PHASE_TAGS[key] ?? key) })));
+
+  const visibleIndices = steps.map((_, index) => index).filter((index) => activePhases.has(steps[index].phase));
+  const filteredSteps = visibleIndices.map((index) => steps[index]);
+  const filteredSeries = series.map((s) => ({
+    ...s,
+    values: visibleIndices.map((index) => s.values[index]),
+    stepPoints: visibleIndices.map((index) => s.stepPoints[index]),
+  }));
+  const filteredAverage = {
+    values: visibleIndices.map((index) => average.values[index]),
+    stepPoints: visibleIndices.map((index) => average.stepPoints[index]),
+  };
+
+  // Always destroyed and rebuilt rather than updated in place — the two
+  // Chart.js views are different `type`s (line vs. bar), which `.update()`
+  // doesn't support switching between, and a rebuild is cheap at the poll
+  // loop's 10s cadence (or a toggle/filter click) anyway.
+  pointsChart?.destroy();
+  pointsChart = null;
+
+  if (filteredSteps.length < 2) {
+    chartEmptyEl.hidden = false;
+    pointsEvolutionCanvas.hidden = true;
+    heatmapEl.hidden = true;
+    chartCardEl.classList.remove("is-heatmap");
+    return;
+  }
+  chartEmptyEl.hidden = true;
+
+  if (chartType === "heatmap") {
+    pointsEvolutionCanvas.hidden = true;
+    chartCardEl.classList.add("is-heatmap");
+    heatmapEl.hidden = false;
+    renderHeatmap(filteredSteps, filteredSeries, viewerId, filteredAverage);
+    return;
+  }
+
+  chartCardEl.classList.remove("is-heatmap");
+  heatmapEl.hidden = true;
+  pointsEvolutionCanvas.hidden = false;
+
+  const builder = { cumulative: buildCumulativeChart, "per-match": buildPerMatchChart, "vs-average": buildVsAverageChart }[
+    chartType
+  ];
+  pointsChart = builder(filteredSteps, filteredSeries, viewerId, filteredAverage);
+}
+
 function renderTable(rows, totalScorableMatches, viewerId) {
   const table = document.createElement("table");
   table.innerHTML = `
@@ -451,6 +872,7 @@ function renderSections(specialSections, matchSections) {
 function renderResult(result, viewerId) {
   if (!result.rows.length) {
     leaderboardEl.hidden = true;
+    renderPointsEvolution({ steps: [], series: [] }, viewerId);
     tableEl.hidden = true;
     sectionsEl.hidden = true;
     showStatus(statusEl, "No players registered yet — ask the organizer.");
@@ -459,6 +881,7 @@ function renderResult(result, viewerId) {
 
   if (result.totalScorableMatches === 0 && !result.specialRevealed) {
     leaderboardEl.hidden = true;
+    renderPointsEvolution({ steps: [], series: [] }, viewerId);
     tableEl.hidden = true;
     sectionsEl.hidden = true;
     showStatus(statusEl, "Standings will appear once the first match kicks off — nothing is scored yet.");
@@ -472,6 +895,7 @@ function renderResult(result, viewerId) {
   if (note) noteEl.textContent = note;
 
   renderTable(result.rows, result.totalScorableMatches, viewerId);
+  renderPointsEvolution(result.pointsEvolution, viewerId);
   renderSections(result.specialSections, result.matchSections);
 }
 
