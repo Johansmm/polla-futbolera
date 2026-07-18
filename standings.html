@@ -63,6 +63,23 @@
 
     <section id="leaderboard-stage" class="leaderboard-stage" aria-label="Front runners" hidden></section>
     <div id="standings-table" class="standings-table" hidden></div>
+
+    <details id="points-evolution" class="info-disclosure points-evolution" hidden>
+      <summary><span><strong>Points evolution</strong><small>Cumulative totals and per-match points, across every resolved match</small></span></summary>
+      <div class="chart-toggle" role="group" aria-label="Chart type">
+        <button type="button" class="chart-toggle-btn is-active" data-chart="cumulative">Cumulative</button>
+        <button type="button" class="chart-toggle-btn" data-chart="vs-average">vs Average</button>
+        <button type="button" class="chart-toggle-btn" data-chart="per-match">Per match</button>
+        <button type="button" class="chart-toggle-btn" data-chart="heatmap">Heatmap per match</button>
+      </div>
+      <div id="phase-filter" class="phase-filter" role="group" aria-label="Filter by phase" hidden></div>
+      <div id="points-evolution-card" class="chart-card">
+        <canvas id="points-evolution-canvas" role="img" aria-label="Points per player across resolved matches"></canvas>
+        <div id="points-evolution-heatmap" class="points-heatmap" hidden></div>
+        <p id="points-evolution-empty" class="chart-empty-note" hidden>Select at least two matches to see a trend.</p>
+      </div>
+    </details>
+
     <div id="breakdown-sections" class="breakdown-sections" hidden></div>
   </main>
 
