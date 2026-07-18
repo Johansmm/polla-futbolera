@@ -286,5 +286,116 @@ export function computeStandingsFromData({
     matchSections,
     specialSections,
     totalScorableMatches: scorableMatches.length,
+    pointsEvolution: computePointsEvolution(rows, scorableMatches, specialRevealed, scoringConfig),
   };
+}
+
+// Short, position-in-phase axis labels (R1, R2, … QF1, QF2, … SF1, SF2,
+// 3rd, F) — PHASE_TAGS' own values ("R16", "3rd place") are sized for a
+// breakdown-section summary line, not a dozen-plus axis ticks squeezed side
+// by side.
+const AXIS_PHASE_ABBR = { r16: "R", qf: "QF", sf: "SF", third_place: "3rd", final: "F" };
+
+// One running-total series per user, stepped across resolved *and*
+// currently-live matches (issue #24 asked for resolved matches; a live
+// one's provisional score already flows into row.matchBreakdown the same
+// way finished ones do — see computeStandingsFromData — so leaving it out
+// would make the chart lag a live-updating standings table by however long
+// the match still has to run) in kickoff order — the x-axis is "matches
+// resolved", not wall-clock time, since the tournament calendar is
+// irregular. A locked-but-not-yet-live match's breakdown points are still
+// null (pending), so it's excluded rather than freezing the line early.
+// specialRevealed adds one trailing step for champion/top-scorer points,
+// folded together since both reveal at the same instant.
+//
+// series is sorted by name rather than following `rows` (rank order) —
+// rank reshuffles every time standings.js recomputes, and a chart whose
+// line colors/positions shuffle along with it would be far harder to read
+// than one with a stable, alphabetical order.
+//
+// Each series carries both `values` (the running total, for the cumulative
+// view) and `stepPoints` (that step's own contribution, un-accumulated) —
+// the latter is what surfaces "one big match carried their total" versus
+// "steady every round" (the standings.js per-match chart view), which the
+// cumulative total alone can't show since it only ever goes up.
+//
+// scoringConfig is only needed for each step's `maxPoints` — the
+// standings.js heatmap view normalizes a cell's color intensity against
+// that match's *theoretical* ceiling (exact score × phase multiplier)
+// rather than the highest score anyone actually got, so a modest round
+// where nobody did well doesn't get displayed as if someone maxed it out.
+export function computePointsEvolution(rows, scorableMatches, specialRevealed, scoringConfig) {
+  const relevant = scorableMatches
+    .filter((match) => (match.real_score_a != null && match.real_score_b != null) || isMatchLive(match))
+    .sort((a, b) => kickoffDate(a) - kickoffDate(b));
+
+  // Numbered off *every* scorable match of that phase (not just the ones
+  // with a step so far), so a match's number is stable — e.g. "QF2" doesn't
+  // relabel itself once QF1 finally resolves.
+  const phaseCounts = new Map();
+  const phaseIndex = new Map();
+  for (const match of [...scorableMatches].sort((a, b) => kickoffDate(a) - kickoffDate(b))) {
+    const count = (phaseCounts.get(match.phase) ?? 0) + 1;
+    phaseCounts.set(match.phase, count);
+    phaseIndex.set(match.id, count);
+  }
+
+  const steps = relevant.map((match) => {
+    const live = isMatchLive(match);
+    const abbr = AXIS_PHASE_ABBR[match.phase] ?? match.phase ?? "?";
+    const numbered = (phaseCounts.get(match.phase) ?? 1) > 1;
+    return {
+      matchId: match.id,
+      phase: match.phase,
+      shortLabel: `${abbr}${numbered ? phaseIndex.get(match.id) : ""}${live ? " \u{1F534}" : ""}`,
+      label: `${PHASE_TAGS[match.phase] ?? match.phase} · ${match.team_a ?? "?"} vs ${match.team_b ?? "?"}${live ? " (Live)" : ""}`,
+      maxPoints: scoringConfig.match_outcome_points.exact_score * (scoringConfig.phase_multipliers[match.phase] ?? 1),
+    };
+  });
+  if (specialRevealed) {
+    const { champion, top_scorer } = scoringConfig.special_predictions;
+    steps.push({
+      matchId: null,
+      phase: "special",
+      shortLabel: "SP",
+      label: "Special picks",
+      maxPoints: champion.exact_champion + top_scorer.exact + top_scorer.team_reaches_semifinal_or_final_bonus,
+    });
+  }
+
+  const series = rows
+    .map((row) => {
+      let running = 0;
+      const values = [];
+      const stepPoints = relevant.map((match) => {
+        const points = row.matchBreakdown[match.id]?.points ?? 0;
+        running += points;
+        values.push(running);
+        return points;
+      });
+      if (specialRevealed) {
+        const specialPoints = row.championPoints + row.topScorerPoints;
+        running += specialPoints;
+        values.push(running);
+        stepPoints.push(specialPoints);
+      }
+      return { userId: row.userId, name: row.name, values, stepPoints };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // The group average at each step, mirroring the standings table's own
+  // "± Avg" column (computeStandingsFromData's row.vsAverage) — plotted as
+  // a reference line alongside every user's series in both chart views.
+  const averageSeries = {
+    values: steps.map((_, index) => averageAt(series, "values", index)),
+    stepPoints: steps.map((_, index) => averageAt(series, "stepPoints", index)),
+  };
+
+  return { steps, series, average: averageSeries };
+}
+
+function averageAt(series, field, index) {
+  if (!series.length) return 0;
+  const sum = series.reduce((total, s) => total + s[field][index], 0);
+  return Math.round((sum / series.length) * 10) / 10;
 }
