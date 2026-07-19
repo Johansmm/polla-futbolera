@@ -64,12 +64,23 @@ export function buildWinnerField(apiMatch) {
   return { winner: null };
 }
 
+// A knockout match past regulation time reports one of these instead of
+// IN_PLAY/PAUSED (see the source's status lookup table) — score.fullTime
+// keeps carrying the running cumulative score throughout regardless of
+// which applies, same as it does for IN_PLAY/PAUSED. Missing either one
+// here used to send a match in extra time (or a shootout) straight to the
+// final `return {}` below: live_score_a/b went missing entirely rather
+// than just stop advancing, which isMatchLive (scoring-logic.mjs) reads
+// the same as "hasn't started yet" — every prediction for that match
+// reverted to "pending" until it was FINISHED.
+const IN_PROGRESS_STATUSES = new Set(["IN_PLAY", "PAUSED", "EXTRA_TIME", "PENALTY_SHOOTOUT"]);
+
 // live_score_a/b are a running score shown while a match is in progress,
 // separate from real_score_a/b (the final result). Cleared back to null at
 // FINISHED so a match's live/finished state stays inferable from these two
 // fields alone.
 export function buildLiveScoreFields(apiMatch) {
-  if (apiMatch.status === "IN_PLAY" || apiMatch.status === "PAUSED") {
+  if (IN_PROGRESS_STATUSES.has(apiMatch.status)) {
     return { live_score_a: apiMatch.score.fullTime.home, live_score_b: apiMatch.score.fullTime.away };
   }
   if (apiMatch.status === "FINISHED") {
