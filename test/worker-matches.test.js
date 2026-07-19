@@ -159,6 +159,22 @@ test("buildLiveScoreFields extracts the running score while in play or paused", 
   assert.deepEqual(buildLiveScoreFields({ ...apiMatch, status: "PAUSED" }), { live_score_a: 1, live_score_b: 0 });
 });
 
+// A knockout match past regulation time reports one of these two statuses
+// instead of IN_PLAY/PAUSED (see the source's status lookup table) — a
+// match missing either one here used to fall through to buildLiveScoreFields'
+// final `return {}`, dropping live_score_a/b entirely and making the match
+// look like it hadn't started, which is exactly the standings.js bug this
+// covers: every prediction for a match in extra time (or a shootout) showed
+// as "pending" until the match was FINISHED.
+test("buildLiveScoreFields keeps tracking the running score through extra time and penalties", () => {
+  const apiMatch = { score: { fullTime: { home: 2, away: 2 } } };
+  assert.deepEqual(buildLiveScoreFields({ ...apiMatch, status: "EXTRA_TIME" }), { live_score_a: 2, live_score_b: 2 });
+  assert.deepEqual(buildLiveScoreFields({ ...apiMatch, status: "PENALTY_SHOOTOUT" }), {
+    live_score_a: 2,
+    live_score_b: 2,
+  });
+});
+
 test("buildLiveScoreFields clears the live score once the match is finished", () => {
   const apiMatch = { status: "FINISHED", score: { fullTime: { home: 2, away: 1 } } };
   assert.deepEqual(buildLiveScoreFields(apiMatch), { live_score_a: null, live_score_b: null });
